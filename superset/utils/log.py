@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=C,R,W
+import os
 import functools
 import inspect
 import json
@@ -25,6 +26,8 @@ from datetime import datetime
 from typing import Any, cast, Type
 
 from flask import current_app, g, request
+
+from applicationinsights import TelemetryClient
 
 
 class AbstractEventLogger(ABC):
@@ -125,8 +128,13 @@ def get_event_logger_from_cfg_value(cfg_value: object) -> AbstractEventLogger:
     logging.info(f"Configured event logger of type {type(result)}")
     return cast(AbstractEventLogger, result)
 
-
+INSTRUMENTATION_KEY=os.environ.get('INSTRUMENTATION_KEY')
+tc = TelemetryClient(INSTRUMENTATION_KEY)
 class DBEventLogger(AbstractEventLogger):
+    def appinsights(self, data):
+        tc.track_event('superset event', { 'data': data })
+        tc.flush()
+    
     def log(self, user_id, action, *args, **kwargs):
         from superset.models.core import Log
 
@@ -152,6 +160,7 @@ class DBEventLogger(AbstractEventLogger):
                 user_id=user_id,
             )
             logs.append(log)
+            self.appinsights(data=log)
 
         sesh = current_app.appbuilder.get_session
         sesh.bulk_save_objects(logs)
