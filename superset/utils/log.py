@@ -132,7 +132,8 @@ INSTRUMENTATION_KEY=os.environ.get('INSTRUMENTATION_KEY')
 tc = TelemetryClient(INSTRUMENTATION_KEY)
 class DBEventLogger(AbstractEventLogger):
     def appinsights(self, data):
-        tc.track_event('superset event', { 'data': data })
+        print(f'appinsights triggerd with {data}')
+        tc.track_event('superset event', data)
         tc.flush()
     
     def log(self, user_id, action, *args, **kwargs):
