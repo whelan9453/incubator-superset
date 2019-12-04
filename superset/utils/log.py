@@ -160,7 +160,7 @@ class DBEventLogger(AbstractEventLogger):
                 user_id=user_id,
             )
             logs.append(log)
-            self.appinsights(data=log)
+            self.appinsights({'action': action, 'json': json_string, 'duration': duration_ms, 'referrer': referrer, 'user_id': user_id})
 
         sesh = current_app.appbuilder.get_session
         sesh.bulk_save_objects(logs)
