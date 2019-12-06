@@ -133,7 +133,7 @@ tc = TelemetryClient(INSTRUMENTATION_KEY)
 class DBEventLogger(AbstractEventLogger):
     def appinsights(self, data):
         print(f'appinsights triggerd with {data}')
-        tc.track_event('superset event', data)
+        tc.track_event('medical.superset', data)
         tc.flush()
     
     def log(self, user_id, action, *args, **kwargs):
@@ -161,7 +161,7 @@ class DBEventLogger(AbstractEventLogger):
                 user_id=user_id,
             )
             logs.append(log)
-            self.appinsights({'action': action, 'json': json_string, 'duration': duration_ms, 'referrer': referrer, 'user_id': user_id})
+            self.appinsights({'level': 'info', 'success': 'true', 'state':'finish', 'function': action, 'json': json_string, 'duration': duration_ms, 'referrer': referrer, 'user_id': user_id})
 
         sesh = current_app.appbuilder.get_session
         sesh.bulk_save_objects(logs)
