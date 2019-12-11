@@ -2758,7 +2758,7 @@ class Superset(BaseSupersetView):
             csv = df.to_csv(index=False, **config.get("CSV_EXPORT"))
         else:
             logging.info("Running a query to turn into CSV")
-            sql = query.select_sql or query.executed_sql
+            sql = query.sql or query.select_sql or query.executed_sql
             df = query.database.get_df(sql, query.schema)
             # TODO(bkyryliuk): add compression=gzip for big files.
             csv = df.to_csv(index=False, **config.get("CSV_EXPORT"))
