@@ -109,6 +109,10 @@ from .utils import (
     get_viz,
 )
 
+from clickhouse_driver import Client
+from itertools import chain
+import os
+
 config = app.config
 CACHE_DEFAULT_TIMEOUT = config.get("CACHE_DEFAULT_TIMEOUT", 0)
 SQLLAB_QUERY_COST_ESTIMATE_TIMEOUT = config.get(
@@ -2756,20 +2760,21 @@ class Superset(BaseSupersetView):
             df = pd.DataFrame.from_records(obj["data"], columns=columns)
             logging.info("Using pandas to convert to CSV")
             csv = df.to_csv(index=False, **config.get("CSV_EXPORT"))
-        else:
-            logging.info("Running a query to turn into CSV")
-            sql = query.sql or query.select_sql or query.executed_sql
-            df = query.database.get_df(sql, query.schema)
-            # TODO(bkyryliuk): add compression=gzip for big files.
-            csv = df.to_csv(index=False, **config.get("CSV_EXPORT"))
-        response = Response(csv, mimetype="text/csv")
-        response.headers[
-            "Content-Disposition"
-        ] = f"attachment; filename={query.name}.csv"
+            response = Response(csv, mimetype="text/csv")
+            response.headers[
+                "Content-Disposition"
+            ] = f"attachment; filename={query.name}.csv"
+            return response
+        # Query ClickHouse
+        logging.info("Running a query to turn into CSV")
+        sql = query.sql or query.select_sql or query.executed_sql
+        #     df = query.database.get_df(sql, query.schema)
+        #     # TODO(bkyryliuk): add compression=gzip for big files.
+        #     csv = df.to_csv(index=False, **config.get("CSV_EXPORT"))
         event_info = {
             "event_type": "data_export",
             "client_id": client_id,
-            "row_count": len(df.index),
+            # "row_count": len(df.index),
             "database": query.database.name,
             "schema": query.schema,
             "sql": query.sql,
@@ -2778,7 +2783,25 @@ class Superset(BaseSupersetView):
         logging.info(
             f"CSV exported: {repr(event_info)}", extra={"superset_event": event_info}
         )
-        return response
+
+        CLICKHOUSE_HOST = os.environ.get('CLICKHOUSE_HOST')
+        CLICKHOUSE_DB = os.environ.get('CLICKHOUSE_DB')
+        CLICKHOUSE_UNAME = os.environ.get('CLICKHOUSE_UNAME')
+        CLICKHOUSE_PWD = os.environ.get('CLICKHOUSE_PWD')
+        client = Client(host=CLICKHOUSE_HOST, database=CLICKHOUSE_DB, user=CLICKHOUSE_UNAME, password=CLICKHOUSE_PWD)
+        logging.debug(f'client.execute\n {client.execute("SHOW DATABASES")}')
+        rows_gen = client.execute_iter(sql, settings={'max_block_size': 10000})
+        # ref: https://flask.palletsprojects.com/en/1.1.x/patterns/streaming/
+        # ref: https://clickhouse-driver.readthedocs.io/en/latest/quickstart.html#streaming-results
+        def generate():
+            cnt = 0
+            for row in rows_gen:
+                s = ''
+                for item in row:
+                    s += str(item) + ','
+                s = s[:-1] + '\n'
+                yield s
+        return Response(generate(), mimetype='text/csv')
 
     @api
     @handle_api_exception
