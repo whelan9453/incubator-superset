@@ -110,7 +110,6 @@ from .utils import (
 )
 
 from clickhouse_driver import Client
-from itertools import chain
 import os
 
 config = app.config

@@ -107,6 +107,7 @@ setup(
         "sqlparse>=0.3.0,<0.4",
         "wtforms-json",
         "applicationinsights",
+        "clickhouse_driver",
     ],
     extras_require={
         "bigquery": ["pybigquery>=0.4.10", "pandas_gbq>=0.10.0"],
