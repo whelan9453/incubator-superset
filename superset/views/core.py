@@ -2724,8 +2724,11 @@ class Superset(BaseSupersetView):
         # Async request.
         if async_flag:
             return self._sql_json_async(session, rendered_query, query)
+        
+        # Extra log info for App Insights
+        extra_log_ifo = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
         # Sync request.
-        return self._sql_json_sync(session, rendered_query, query)
+        return self._sql_json_sync(session, rendered_query, query), extra_log_ifo
 
     @has_access
     @expose("/csv/<client_id>")
@@ -2783,6 +2786,9 @@ class Superset(BaseSupersetView):
             f"CSV exported: {repr(event_info)}", extra={"superset_event": event_info}
         )
 
+        # Extra log info for App Insights
+        extra_log_ifo = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
+
         CLICKHOUSE_HOST = os.environ.get('CLICKHOUSE_HOST')
         CLICKHOUSE_DB = os.environ.get('CLICKHOUSE_DB')
         CLICKHOUSE_UNAME = os.environ.get('CLICKHOUSE_UNAME')
@@ -2800,7 +2806,7 @@ class Superset(BaseSupersetView):
                     s += str(item) + ','
                 s = s[:-1] + '\n'
                 yield s
-        return Response(generate(), mimetype='text/csv')
+        return Response(generate(), mimetype='text/csv'), extra_log_ifo
 
     @api
     @handle_api_exception
