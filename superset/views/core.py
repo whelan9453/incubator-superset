@@ -2726,9 +2726,9 @@ class Superset(BaseSupersetView):
             return self._sql_json_async(session, rendered_query, query)
         
         # Extra log info for App Insights
-        extra_log_ifo = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
+        extra_info = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
         # Sync request.
-        return self._sql_json_sync(session, rendered_query, query), extra_log_ifo
+        return self._sql_json_sync(session, rendered_query, query), extra_info
 
     @has_access
     @expose("/csv/<client_id>")
@@ -2784,7 +2784,7 @@ class Superset(BaseSupersetView):
         )
 
         # Extra log info for App Insights
-        extra_log_ifo = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
+        extra_info = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
 
         # Fetch Clickhouse secrets from ENVs
         CLICKHOUSE_HOST = os.environ.get('CLICKHOUSE_HOST')
@@ -2800,11 +2800,12 @@ class Superset(BaseSupersetView):
             for row in rows_gen:
                 s = ''
                 for item in row:
-                    s += str(item) + ','
+                    item = str(item).replace('\n', '')
+                    s += item + ','
                 s = s[:-1] + '\n'
                 yield s
 
-        return Response(generate(), mimetype='text/csv'), extra_log_ifo
+        return Response(generate(), mimetype='text/csv'), extra_info
 
     @api
     @handle_api_exception

@@ -60,7 +60,11 @@ class AbstractEventLogger(ABC):
 
             self.stats_logger.incr(f.__name__)
             start_dttm = datetime.now()
-            value, extra_log_ifo = f(*args, **kwargs)
+            value = f(*args, **kwargs)
+            extra_info = {}
+            if isinstance(value, tuple):
+                extra_info = value[1]
+                value = value[0]
             duration_ms = (datetime.now() - start_dttm).total_seconds() * 1000
 
             # bulk insert
@@ -80,9 +84,9 @@ class AbstractEventLogger(ABC):
                 slice_id=slice_id,
                 duration_ms=duration_ms,
                 referrer=referrer,
-                database=extra_log_ifo.get("database"),
-                schema=extra_log_ifo.get("schema"),
-                sql=extra_log_ifo.get("sql"),
+                database=extra_info.get("database"),
+                schema=extra_info.get("schema"),
+                sql=extra_info.get("sql"),
             )
             return value
 
