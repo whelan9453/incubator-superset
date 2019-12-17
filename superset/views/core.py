@@ -2794,7 +2794,8 @@ class Superset(BaseSupersetView):
             for row in rows_gen:
                 s = ''
                 for item in row:
-                    s += str(item) + ','
+                    item = str(item).replace('\n', '')
+                    s += item + ','
                 s = s[:-1] + '\n'
                 yield s
         return Response(generate(), mimetype='text/csv')
