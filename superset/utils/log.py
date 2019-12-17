@@ -61,6 +61,10 @@ class AbstractEventLogger(ABC):
             self.stats_logger.incr(f.__name__)
             start_dttm = datetime.now()
             value = f(*args, **kwargs)
+            extra_info = {}
+            if isinstance(value, tuple):
+                extra_info = value[1]
+                value = value[0]
             duration_ms = (datetime.now() - start_dttm).total_seconds() * 1000
 
             # bulk insert
@@ -80,6 +84,9 @@ class AbstractEventLogger(ABC):
                 slice_id=slice_id,
                 duration_ms=duration_ms,
                 referrer=referrer,
+                database=extra_info.get("database"),
+                schema=extra_info.get("schema"),
+                sql=extra_info.get("sql"),
             )
             return value
 
@@ -144,6 +151,9 @@ class DBEventLogger(AbstractEventLogger):
         slice_id = kwargs.get("slice_id")
         duration_ms = kwargs.get("duration_ms")
         referrer = kwargs.get("referrer")
+        database = kwargs.get("database")
+        schema = kwargs.get("schema")
+        sql = kwargs.get("sql")
 
         logs = list()
         for record in records:
@@ -161,7 +171,12 @@ class DBEventLogger(AbstractEventLogger):
                 user_id=user_id,
             )
             logs.append(log)
-            self.appinsights({'level': 'info', 'success': 'true', 'state':'finish', 'function': action, 'json': json_string, 'duration': duration_ms, 'referrer': referrer, 'user_id': user_id})
+            self.appinsights(
+                {'level': 'info', 'success': 'true', 'state':'finish', 
+                'function': action, 'json': json_string, 'duration': duration_ms, 
+                'referrer': referrer, 'user_id': user_id,
+                'database': database, 'schema': schema, 'sql': sql
+                })
 
         sesh = current_app.appbuilder.get_session
         sesh.bulk_save_objects(logs)
