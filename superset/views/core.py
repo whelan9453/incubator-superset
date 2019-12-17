@@ -2770,7 +2770,6 @@ class Superset(BaseSupersetView):
         event_info = {
             "event_type": "data_export",
             "client_id": client_id,
-            # "row_count": len(df.index),
             "database": query.database.name,
             "schema": query.schema,
             "sql": query.sql,
@@ -2794,7 +2793,8 @@ class Superset(BaseSupersetView):
             for row in rows_gen:
                 s = ''
                 for item in row:
-                    s += str(item) + ','
+                    item = str(item).replace('\n', '')
+                    s += item + ','
                 s = s[:-1] + '\n'
                 yield s
         return Response(generate(), mimetype='text/csv')
