@@ -2770,9 +2770,6 @@ class Superset(BaseSupersetView):
         # Query ClickHouse
         logging.info("Running a query to turn into CSV")
         sql = query.sql or query.select_sql or query.executed_sql
-        #     df = query.database.get_df(sql, query.schema)
-        #     # TODO(bkyryliuk): add compression=gzip for big files.
-        #     csv = df.to_csv(index=False, **config.get("CSV_EXPORT"))
         event_info = {
             "event_type": "data_export",
             "client_id": client_id,
@@ -2789,13 +2786,13 @@ class Superset(BaseSupersetView):
         # Extra log info for App Insights
         extra_log_ifo = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
 
+        # Fetch Clickhouse secrets from ENVs
         CLICKHOUSE_HOST = os.environ.get('CLICKHOUSE_HOST')
-        CLICKHOUSE_DB = os.environ.get('CLICKHOUSE_DB')
         CLICKHOUSE_UNAME = os.environ.get('CLICKHOUSE_UNAME')
         CLICKHOUSE_PWD = os.environ.get('CLICKHOUSE_PWD')
-        client = Client(host=CLICKHOUSE_HOST, database=CLICKHOUSE_DB, user=CLICKHOUSE_UNAME, password=CLICKHOUSE_PWD)
-        logging.debug(f'client.execute\n {client.execute("SHOW DATABASES")}')
+        client = Client(host=CLICKHOUSE_HOST, database=query.schema, user=CLICKHOUSE_UNAME, password=CLICKHOUSE_PWD)
         rows_gen = client.execute_iter(sql, settings={'max_block_size': 10000})
+        # Utilize the generator pattern to stream CSV contents
         # ref: https://flask.palletsprojects.com/en/1.1.x/patterns/streaming/
         # ref: https://clickhouse-driver.readthedocs.io/en/latest/quickstart.html#streaming-results
         def generate():
@@ -2806,6 +2803,7 @@ class Superset(BaseSupersetView):
                     s += str(item) + ','
                 s = s[:-1] + '\n'
                 yield s
+
         return Response(generate(), mimetype='text/csv'), extra_log_ifo
 
     @api
