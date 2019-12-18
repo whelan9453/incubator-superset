@@ -2724,8 +2724,11 @@ class Superset(BaseSupersetView):
         # Async request.
         if async_flag:
             return self._sql_json_async(session, rendered_query, query)
+        
+        # Extra log info for App Insights
+        extra_info = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
         # Sync request.
-        return self._sql_json_sync(session, rendered_query, query)
+        return self._sql_json_sync(session, rendered_query, query), extra_info
 
     @has_access
     @expose("/csv/<client_id>")
@@ -2779,6 +2782,9 @@ class Superset(BaseSupersetView):
             f"CSV exported: {repr(event_info)}", extra={"superset_event": event_info}
         )
 
+        # Extra log info for App Insights
+        extra_info = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
+
         # Fetch Clickhouse secrets from ENVs
         CLICKHOUSE_HOST = os.environ.get('CLICKHOUSE_HOST')
         CLICKHOUSE_UNAME = os.environ.get('CLICKHOUSE_UNAME')
@@ -2797,7 +2803,8 @@ class Superset(BaseSupersetView):
                     s += item + ','
                 s = s[:-1] + '\n'
                 yield s
-        return Response(generate(), mimetype='text/csv')
+
+        return Response(generate(), mimetype='text/csv'), extra_info
 
     @api
     @handle_api_exception
