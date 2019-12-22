@@ -111,6 +111,7 @@ from .utils import (
 
 from clickhouse_driver import Client
 import os
+from time import sleep
 
 config = app.config
 CACHE_DEFAULT_TIMEOUT = config.get("CACHE_DEFAULT_TIMEOUT", 0)
@@ -2797,6 +2798,9 @@ class Superset(BaseSupersetView):
         def generate():
             cnt = 0
             for row in rows_gen:
+                # We add sleep(0) between generator iterations to give the worker a break 
+                # to update the heartbeat file and keep the connection and worker process alive.
+                sleep(0)
                 s = ''
                 for item in row:
                     item = str(item).replace('\n', '')
