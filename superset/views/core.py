@@ -2804,16 +2804,16 @@ class Superset(BaseSupersetView):
                 s = ''
                 for item in row:
                     # Remove extra commas
-                    item = str(item).replace(',', '')
+                    item = str(item).replace(',', ' ')
                     # Remove new lines in Windows
                     if '\r\n' in item:
-                        item = item.replace('\r\n', '')
+                        item = item.replace('\r\n', ' ')
                     # Remove new lines in Linux and new MacOS
                     if '\n' in item:
-                        item = item.replace('\n', '')
+                        item = item.replace('\n', ' ')
                     # Remove new lines in old MacOS
                     if '\r' in item:
-                        item = item.replace('\r', '')
+                        item = item.replace('\r', ' ')
                     # Escape double quotes
                     if '"' in item:
                         item = item.replace('"', '""')
