@@ -2803,7 +2803,20 @@ class Superset(BaseSupersetView):
                 sleep(0)
                 s = ''
                 for item in row:
-                    item = str(item).replace('\n', '')
+                    # Remove extra commas
+                    item = str(item).replace(',', '')
+                    # Remove new lines in Windows
+                    if '\r\n' in item:
+                        item = item.replace('\r\n', '')
+                    # Remove new lines in Linux and new MacOS
+                    if '\n' in item:
+                        item = item.replace('\n', '')
+                    # Remove new lines in old MacOS
+                    if '\r' in item:
+                        item = item.replace('\r', '')
+                    # Escape double quotes
+                    if '"' in item:
+                        item = item.replace('"', '""')
                     s += item + ','
                 s = s[:-1] + '\n'
                 yield s
