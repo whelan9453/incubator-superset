@@ -2774,7 +2774,6 @@ class Superset(BaseSupersetView):
         event_info = {
             "event_type": "data_export",
             "client_id": client_id,
-            # "row_count": len(df.index),
             "database": query.database.name,
             "schema": query.schema,
             "sql": query.sql,
