@@ -112,6 +112,7 @@ from .utils import (
 from clickhouse_driver import Client
 import os
 from time import sleep
+from urllib.parse import urlparse
 
 config = app.config
 CACHE_DEFAULT_TIMEOUT = config.get("CACHE_DEFAULT_TIMEOUT", 0)
@@ -2739,6 +2740,12 @@ class Superset(BaseSupersetView):
         logging.info("Exporting CSV file [{}]".format(client_id))
         query = db.session.query(Query).filter_by(client_id=client_id).one()
 
+        # Handle the situations when schema is empty
+        if query.schema is None:
+            # Utilize the endpoint of the SQLAlchemy URI as our fallback schema
+            query.schema = urlparse(query.database.sqlalchemy_uri).path.strip('/')
+            logging.info(f'Empty query schema. Replaced it with the endpoint of sqlalchemy_uri: {query.schema}')
+
         rejected_tables = security_manager.rejected_tables(
             query.sql, query.database, query.schema
         )
@@ -2791,37 +2798,49 @@ class Superset(BaseSupersetView):
         CLICKHOUSE_UNAME = os.environ.get('CLICKHOUSE_UNAME')
         CLICKHOUSE_PWD = os.environ.get('CLICKHOUSE_PWD')
         client = Client(host=CLICKHOUSE_HOST, database=query.schema, user=CLICKHOUSE_UNAME, password=CLICKHOUSE_PWD)
-        rows_gen = client.execute_iter(sql, settings={'max_block_size': 10000})
+        rows_gen = client.execute_iter(sql, with_column_types=True, settings={'max_block_size': 10000})
         # Utilize the generator pattern to stream CSV contents
         # ref: https://flask.palletsprojects.com/en/1.1.x/patterns/streaming/
         # ref: https://clickhouse-driver.readthedocs.io/en/latest/quickstart.html#streaming-results
         def generate():
-            cnt = 0
+            # Determine whether this row is CSV header(columns) or not
+            isHeader = True
             for row in rows_gen:
                 # We add sleep(0) between generator iterations to give the worker a break 
                 # to update the heartbeat file and keep the connection and worker process alive.
                 sleep(0)
                 s = ''
-                for item in row:
-                    # Remove extra commas
-                    item = str(item).replace(',', ' ')
-                    # Remove new lines in Windows
-                    if '\r\n' in item:
-                        item = item.replace('\r\n', ' ')
-                    # Remove new lines in Linux and new MacOS
-                    if '\n' in item:
-                        item = item.replace('\n', ' ')
-                    # Remove new lines in old MacOS
-                    if '\r' in item:
-                        item = item.replace('\r', ' ')
-                    # Escape double quotes
-                    if '"' in item:
-                        item = item.replace('"', '""')
-                    s += item + ','
-                s = s[:-1] + '\n'
+                if isHeader:
+                    # Transform headers from a list of tuples to a comma-seperated string
+                    s = ','.join([col[0] for col in row])
+                    s += '\n'
+                    isHeader = False
+                else:
+                    for item in row:
+                        # Remove extra commas
+                        item = str(item).replace(',', ' ')
+                        # Remove new lines in Windows
+                        if '\r\n' in item:
+                            item = item.replace('\r\n', ' ')
+                        # Remove new lines in Linux and new MacOS
+                        if '\n' in item:
+                            item = item.replace('\n', ' ')
+                        # Remove new lines in old MacOS
+                        if '\r' in item:
+                            item = item.replace('\r', ' ')
+                        # Escape double quotes
+                        if '"' in item:
+                            item = item.replace('"', '""')
+                        s += item + ','
+                    s = s[:-1] + '\n'
                 yield s
 
-        return Response(generate(), mimetype='text/csv'), extra_info
+        response = Response(generate(), mimetype='text/csv')
+        # Add the header to assign the filename and filename extension of the response
+        response.headers[
+            "Content-Disposition"
+        ] = f"attachment; filename={query.name}.csv"
+        return response, extra_info
 
     @api
     @handle_api_exception
