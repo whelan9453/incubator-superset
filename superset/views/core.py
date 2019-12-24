@@ -2813,24 +2813,26 @@ class Superset(BaseSupersetView):
                 if isHeader:
                     # Transform headers from a list of tuples to a comma-seperated string
                     s = ','.join([col[0] for col in row])
+                    s += '\n'
                     isHeader = False
-                for item in row:
-                    # Remove extra commas
-                    item = str(item).replace(',', ' ')
-                    # Remove new lines in Windows
-                    if '\r\n' in item:
-                        item = item.replace('\r\n', ' ')
-                    # Remove new lines in Linux and new MacOS
-                    if '\n' in item:
-                        item = item.replace('\n', ' ')
-                    # Remove new lines in old MacOS
-                    if '\r' in item:
-                        item = item.replace('\r', ' ')
-                    # Escape double quotes
-                    if '"' in item:
-                        item = item.replace('"', '""')
-                    s += item + ','
-                s = s[:-1] + '\n'
+                else:
+                    for item in row:
+                        # Remove extra commas
+                        item = str(item).replace(',', ' ')
+                        # Remove new lines in Windows
+                        if '\r\n' in item:
+                            item = item.replace('\r\n', ' ')
+                        # Remove new lines in Linux and new MacOS
+                        if '\n' in item:
+                            item = item.replace('\n', ' ')
+                        # Remove new lines in old MacOS
+                        if '\r' in item:
+                            item = item.replace('\r', ' ')
+                        # Escape double quotes
+                        if '"' in item:
+                            item = item.replace('"', '""')
+                        s += item + ','
+                    s = s[:-1] + '\n'
                 yield s
 
         response = Response(generate(), mimetype='text/csv')
