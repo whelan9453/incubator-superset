@@ -2732,6 +2732,130 @@ class Superset(BaseSupersetView):
         # Sync request.
         return self._sql_json_sync(session, rendered_query, query), extra_info
 
+    @api
+    @expose("/sql_json_api", methods=["POST"])
+    @event_logger.log_this
+    def sql_json_api(self):
+        """Runs arbitrary sql and returns data as json"""
+        # Collect Values
+        print('## Req Json: '+str(request.json))
+        access_key: str = request.json.get("access_key")
+        database_id: int = request.json.get("database_id")
+        schema: str = request.json.get("schema")
+        sql: str = request.json.get("sql")
+
+        user_id: int = db.session.query(UserAttribute.user_id).filter_by(access_key=access_key).first()
+        print("user_id: "+str(user_id))
+        if user_id:
+            g.user = security_manager.get_user_by_id(user_id)
+            print("user: "+str(g.user))
+        else:
+            logging.warning("Invalid access_key to sql_json_api: "+access_key)
+            return json_error_response(
+                f"access_key is not available"
+            )
+
+        print("database_id"+str(database_id))
+        print("request"+json.dumps(request.json))
+        try:
+            template_params: dict = json.loads(
+                request.json.get("templateParams") or "{}"
+            )
+        except json.decoder.JSONDecodeError:
+            logging.warning(
+                f"Invalid template parameter {request.json.get('templateParams')}"
+                " specified. Defaulting to empty dict"
+            )
+            template_params = {}
+        limit = request.json.get("queryLimit") or app.config.get("SQL_MAX_ROW")
+        async_flag: bool = request.json.get("runAsync")
+        if limit < 0:
+            logging.warning(
+                f"Invalid limit of {limit} specified. Defaulting to max limit."
+            )
+            limit = 0
+        select_as_cta: bool = request.json.get("select_as_cta")
+        tmp_table_name: str = request.json.get("tmp_table_name")
+        client_id: str = request.json.get("client_id") or utils.shortid()[:10]
+        sql_editor_id: str = request.json.get("sql_editor_id")
+        tab_name: str = request.json.get("tab")
+        status: bool = QueryStatus.PENDING if async_flag else QueryStatus.RUNNING
+
+        session = db.session()
+        mydb = session.query(models.Database).filter_by(id=database_id).one_or_none()
+        if not mydb:
+            return json_error_response(f"Database with id {database_id} is missing.")
+
+        # Set tmp_table_name for CTA
+        if select_as_cta and mydb.force_ctas_schema:
+            tmp_table_name = f"{mydb.force_ctas_schema}.{tmp_table_name}"
+
+        # Save current query
+        query = Query(
+            database_id=database_id,
+            sql=sql,
+            schema=schema,
+            select_as_cta=select_as_cta,
+            start_time=now_as_float(),
+            tab_name=tab_name,
+            status=status,
+            sql_editor_id=sql_editor_id,
+            tmp_table_name=tmp_table_name,
+            user_id=g.user.get_id() if g.user else None,
+            client_id=client_id,
+        )
+        try:
+            # session.add(query)
+            # session.flush()
+            query_id = query.id
+            # session.commit()  # shouldn't be necessary
+        except SQLAlchemyError as e:
+            logging.error(f"Errors saving query details {e}")
+            # session.rollback()
+            raise Exception(_("Query record was not created as expected."))
+        # if not query_id:
+        #     raise Exception(_("Query record was not created as expected."))
+
+        logging.info(f"Triggering query_id: {query_id}")
+
+        rejected_tables = security_manager.rejected_tables(sql, mydb, schema)
+        if rejected_tables:
+            print("##### rejected_tables")
+            query.status = QueryStatus.FAILED
+            # session.commit()
+            return json_error_response(
+                security_manager.get_table_access_error_msg(rejected_tables),
+                link=security_manager.get_table_access_link(rejected_tables),
+                status=403,
+            )
+
+        try:
+            template_processor = get_template_processor(
+                database=query.database, query=query
+            )
+            rendered_query = template_processor.process_template(
+                query.sql, **template_params
+            )
+        except Exception as e:
+            error_msg = utils.error_msg_from_exception(e)
+            return json_error_response(
+                f"Query {query_id}: Template rendering failed: {error_msg}"
+            )
+
+        # set LIMIT after template processing
+        limits = [mydb.db_engine_spec.get_limit_from_sql(rendered_query), limit]
+        query.limit = min(lim for lim in limits if lim is not None)
+
+        # Async request.
+        if async_flag:
+            print("##### async_flag")
+            return self._sql_json_async(session, rendered_query, query)
+
+        # Extra log info for App Insights
+        extra_info = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
+        # Sync request.
+        return self._sql_json_sync(session, rendered_query, query), extra_info
+
     @has_access
     @expose("/csv/<client_id>")
     @event_logger.log_this
