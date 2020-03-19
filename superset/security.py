@@ -302,19 +302,23 @@ class SupersetSecurityManager(SecurityManager):
 
         from superset import db
 
-        if self.database_access(database) or self.all_datasource_access():
+        if self.all_datasource_access():
             return True
 
         schema_perm = self.get_schema_perm(database, schema)
-        if schema_perm and self.can_access("schema_access", schema_perm):
-            return True
 
-        datasources = ConnectorRegistry.query_datasources_by_name(
-            db.session, database, table_name, schema=schema
-        )
-        for datasource in datasources:
-            if self.can_access("datasource_access", datasource.perm):
-                return True
+        if self.database_access(database) \
+            and schema_perm \
+            and self.can_access("schema_access", schema_perm):
+
+                datasources = ConnectorRegistry.query_datasources_by_name(
+                    db.session, database, table_name, schema=schema
+                )
+
+                for datasource in datasources:
+                    if self.can_access("datasource_access", datasource.perm):
+                        return True
+
         return False
 
     def _get_schema_and_table(
