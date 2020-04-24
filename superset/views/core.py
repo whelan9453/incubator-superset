@@ -2740,22 +2740,37 @@ class Superset(BaseSupersetView):
         # Collect Values
         print('## Req Json: '+str(request.json))
         access_key: str = request.json.get("access_key")
+        database_name: int = request.json.get("database_name")
         database_id: int = request.json.get("database_id")
         schema: str = request.json.get("schema")
         sql: str = request.json.get("sql")
 
-        user_id: int = db.session.query(UserAttribute.user_id).filter_by(access_key=access_key).first()
+        session = db.session()
+        user_id: int = session.query(UserAttribute.user_id).filter_by(access_key=access_key).first()
         print("user_id: "+str(user_id))
         if user_id:
+            user_id = user_id[0]
             g.user = security_manager.get_user_by_id(user_id)
-            print("user: "+str(g.user))
+            print(f"user: {str(g.user)} {g.user.get_id()}")
         else:
-            logging.warning("Invalid access_key to sql_json_api: "+access_key)
+            logging.warning(f"Invalid access_key to sql_json_api: {str(access_key)}")
             return json_error_response(
                 f"access_key is not available"
             )
 
-        print("database_id"+str(database_id))
+        if database_id == None:
+            database_ids: tuple = session.query(models.Database.id).filter_by(database_name=database_name).first()
+
+            if database_ids == None:
+                logging.warning(f"User specified database not found: {database_name}, User name: {g.user}")
+                return json_error_response(
+                    f"Database '{database_name}' is not available"
+                )
+            else:
+                database_id = database_ids[0]
+
+
+        print("database_id: "+str(database_id))
         print("request"+json.dumps(request.json))
         try:
             template_params: dict = json.loads(
@@ -2781,7 +2796,7 @@ class Superset(BaseSupersetView):
         tab_name: str = request.json.get("tab")
         status: bool = QueryStatus.PENDING if async_flag else QueryStatus.RUNNING
 
-        session = db.session()
+        # session = db.session()
         mydb = session.query(models.Database).filter_by(id=database_id).one_or_none()
         if not mydb:
             return json_error_response(f"Database with id {database_id} is missing.")
@@ -2805,10 +2820,10 @@ class Superset(BaseSupersetView):
             client_id=client_id,
         )
         try:
-            # session.add(query)
-            # session.flush()
+            session.add(query)
+            session.flush()
             query_id = query.id
-            # session.commit()  # shouldn't be necessary
+            session.commit()  # shouldn't be necessary
         except SQLAlchemyError as e:
             logging.error(f"Errors saving query details {e}")
             # session.rollback()
@@ -2852,7 +2867,7 @@ class Superset(BaseSupersetView):
             return self._sql_json_async(session, rendered_query, query)
 
         # Extra log info for App Insights
-        extra_info = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
+        extra_info = {'user_id': user_id, 'database': query.database.name+"test", 'schema': query.schema, 'sql': query.sql}
         # Sync request.
         return self._sql_json_sync(session, rendered_query, query), extra_info
 

@@ -76,6 +76,9 @@ class AbstractEventLogger(ABC):
 
             referrer = request.referrer[:1000] if request.referrer else None
 
+            if user_id == None:
+                user_id = extra_info.get("user_id")
+
             self.log(
                 user_id,
                 f.__name__,
