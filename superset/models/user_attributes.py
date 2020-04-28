@@ -15,13 +15,17 @@
 # specific language governing permissions and limitations
 # under the License.
 from uuid import uuid4
+import logging
 
 from flask_appbuilder import Model
 from sqlalchemy import Column, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
+from sqlalchemy.ext.hybrid import hybrid_property
+from flask_appbuilder.models.decorators import renders
 
 from superset import security_manager
 from superset.models.helpers import AuditMixinNullable
+from flask_appbuilder.security.sqla import models as ab_models
 
 
 class UserAttribute(Model, AuditMixinNullable):
@@ -46,3 +50,24 @@ class UserAttribute(Model, AuditMixinNullable):
     welcome_dashboard = relationship("Dashboard")
 
     access_key = Column(String,  default=uuid4)
+
+    @property
+    def username(self):
+        # print('render user_id as its name')
+        return self.user.username
+
+    @username.setter
+    def username(self, value):
+        pass
+
+    @property
+    def new_access_key(self):
+        return self._new_key
+
+    @new_access_key.setter
+    def new_access_key(self, value):
+        self._new_key = value
+
+    @property
+    def changed_by_name(self):
+        return self.changed_by_
