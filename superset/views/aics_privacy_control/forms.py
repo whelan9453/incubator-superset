@@ -17,6 +17,9 @@ class BS3TextFieldROWidget(BS3TextFieldWidget):
         kwargs['readonly'] = 'true'
         return super(BS3TextFieldROWidget, self).__call__(field, **kwargs)
 
+class AccessKeyAddForm(DynamicForm):
+    username = QuerySelectField('username', query_factory=department_query)
+
 class AccessKeyEditForm(DynamicForm):
     username = TextField(_('username'), widget=BS3TextFieldROWidget())
     access_key =  SelectField(_('access_key'),

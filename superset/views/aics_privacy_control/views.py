@@ -53,14 +53,10 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
         'user': QuerySelectField('User',
             query_factory=get_user_options,
             get_label='username'),
-        'access_key': TextField('Access Key',
-            widget=BS3TextFieldROWidget(),
-            description=('Not editable. Automatic generated key.'),
-            default=str(uuid4())),
     }
 
     description_columns = {
-        'access_key': 'Auto-generated access key. DO NOT EDIT IT!!',
+        'access_key': 'DO NOT EDIT IT!! Auto-generated access key. Refresh page if you don\'t like it',
     }
 
     edit_form_extra_fields = {

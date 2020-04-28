@@ -101,8 +101,6 @@ from .base import (
     SupersetModelView,
 )
 from .database import api as database_api, views as in_views
-# from .aics_privacy_control import AccessKeyModelView
-# from . import aics_privacy_control
 from .utils import (
     apply_display_max_row_limit,
     bootstrap_user_data,
