@@ -2745,11 +2745,9 @@ class Superset(BaseSupersetView):
 
         session = db.session()
         user_id: int = session.query(UserAttribute.user_id).filter_by(access_key=access_key).first()
-        print("user_id: "+str(user_id))
         if user_id:
             user_id = user_id[0]
             g.user = security_manager.get_user_by_id(user_id)
-            print(f"user: {str(g.user)} {g.user.get_id()}")
         else:
             logging.warning(f"Invalid access_key to sql_json_api: {str(access_key)}")
             return json_error_response(
@@ -2769,7 +2767,7 @@ class Superset(BaseSupersetView):
         client_id: str = request.json.get("client_id") or utils.shortid()[:10]
         # sql_editor_id: str = request.json.get("sql_editor_id")
         # tab_name: str = request.json.get("tab")
-        status: bool = QueryStatus.PENDING if async_flag else QueryStatus.RUNNING
+        status: bool = QueryStatus.RUNNING
 
         # Set tmp_table_name for CTA
         if select_as_cta and mydb.force_ctas_schema:
@@ -2913,7 +2911,6 @@ class Superset(BaseSupersetView):
                     # Transform headers from a list of tuples to a comma-seperated string
                     s = ','.join([f'"{col[0]}"' for col in row])
                     header_has_type = False
-                    print(s)
                     yield s
                     continue
 
@@ -3038,7 +3035,6 @@ class Superset(BaseSupersetView):
                     # Transform headers from a list of tuples to a comma-seperated string
                     s = ','.join([f'"{col[0]}"' for col in row])
                     header_has_type = False
-                    print(s)
                     yield s
                     continue
 
