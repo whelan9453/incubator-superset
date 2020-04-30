@@ -2732,10 +2732,134 @@ class Superset(BaseSupersetView):
         # Sync request.
         return self._sql_json_sync(session, rendered_query, query), extra_info
 
+    def _streaming_csv(self, query, client_id):
+
+        blob = None
+        if results_backend and query.results_key:
+            logging.info(
+                "Fetching CSV from results backend " "[{}]".format(query.results_key)
+            )
+            blob = results_backend.get(query.results_key)
+        if blob:
+            logging.info("Decompressing")
+            payload = utils.zlib_decompress(
+                blob, decode=not results_backend_use_msgpack
+            )
+            obj = _deserialize_results_payload(
+                payload, query, results_backend_use_msgpack
+            )
+            columns = [c["name"] for c in obj["columns"]]
+            df = pd.DataFrame.from_records(obj["data"], columns=columns)
+            logging.info("Using pandas to convert to CSV")
+            csv = df.to_csv(index=False, **config.get("CSV_EXPORT"))
+            response = Response(csv, mimetype="text/csv")
+            response.headers[
+                "Content-Disposition"
+            ] = f"attachment; filename={query.name}.csv"
+            return response
+        # Query Database
+        logging.info("Running a query to turn into CSV")
+        sql = query.sql or query.select_sql or query.executed_sql
+
+        # Handle the situations when schema is empty
+        if query.schema is None:
+            # Utilize the endpoint of the SQLAlchemy URI as our fallback schema
+            query.schema = urlparse(query.database.sqlalchemy_uri).path.strip('/')
+            logging.info(f'Empty query schema. Replaced it with the endpoint of sqlalchemy_uri: {query.schema}')
+
+        event_info = {
+            "event_type": "data_export",
+            "client_id": client_id,
+            "database": query.database.name,
+            "schema": query.schema,
+            "sql": query.sql,
+            "exported_format": "csv",
+        }
+        logging.info(
+            f"CSV exported: {repr(event_info)}", extra={"superset_event": event_info}
+        )
+
+        # Extra log info for App Insights
+        extra_info = {'user_id': query.user_id, 'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
+
+        database = query.database
+        db_dialect = re.sub(r':.*', '', database.sqlalchemy_uri)
+
+        if 'clickhouse' in db_dialect.lower():
+            # Fetch Clickhouse secrets from ENVs
+            CLICKHOUSE_HOST = os.environ.get('CLICKHOUSE_HOST')
+            CLICKHOUSE_PORT = os.environ.get('CLICKHOUSE_PORT', '9000')
+            CLICKHOUSE_UNAME = os.environ.get('CLICKHOUSE_UNAME')
+            CLICKHOUSE_PWD = os.environ.get('CLICKHOUSE_PWD')
+            client = Client(host=CLICKHOUSE_HOST, database=query.schema, user=CLICKHOUSE_UNAME, password=CLICKHOUSE_PWD, port=CLICKHOUSE_PORT)
+            src_data = client.execute_iter(sql, with_column_types=True, settings={'max_block_size': 10000})
+            header_has_type = True
+        else:
+            engine = database.get_sqla_engine(
+                schema=query.schema,
+                nullpool=True,
+                user_name=g.user.username if g.user else None,
+                source=utils.sources.get("sql_lab", None),
+            )
+
+            def stream_data_gen():
+                # Streaming results at least available for psycopg2, mysqldb and pymysql
+                # ref: https://docs.sqlalchemy.org/en/13/core/connections.html#sqlalchemy.engine.Connection.execution_options.params.stream_results
+                data_stream = engine.execution_options(stream_results=True).execute(sql)
+                print_header = True
+                batch=1000
+                data_count = 0
+                chunk = data_stream.fetchmany(batch)
+                while chunk:
+                    for row in chunk:
+                        if print_header:
+                            print_header = False
+                            yield data_stream.keys()
+                        data_count += 1
+                        yield row
+                    chunk = data_stream.fetchmany(batch)
+                data_stream.close()
+
+            header_has_type = False
+            src_data = stream_data_gen()
+
+        # Utilize the generator pattern to stream CSV contents
+        # ref: https://flask.palletsprojects.com/en/1.1.x/patterns/streaming/
+        # ref: https://clickhouse-driver.readthedocs.io/en/latest/quickstart.html#streaming-results
+        def generate(header_has_type):
+
+            for row in src_data:
+                # We add sleep(0) between generator iterations to give the worker a break
+                # to update the heartbeat file and keep the connection and worker process alive.
+                sleep(0)
+                s = ''
+                # Determine whether this row is CSV header(columns) or not
+                if header_has_type:
+                    # Transform headers from a list of tuples to a comma-seperated string
+                    s = ','.join([f'"{col[0]}"' for col in row])
+                    header_has_type = False
+                    yield s+ '\n'
+                    continue
+
+                for item in row:
+                    # Escape double quotes
+                    if '"' in str(item):
+                        item = item.replace('"', '""')
+                    s += f'"{item}",'
+                s = s[:-1] + '\n'
+                yield s
+
+        response = Response(generate(header_has_type=header_has_type), mimetype='text/csv')
+        # Add the header to assign the filename and filename extension of the response
+        response.headers[
+            "Content-Disposition"
+        ] = f"attachment; filename={query.name}.csv"
+        return response, extra_info
+
     @api
-    @expose("/sql_json_api", methods=["POST"])
+    @expose("/sql_csv_api", methods=["POST"])
     @event_logger.log_this
-    def sql_json_api(self):
+    def sql_csv_api(self):
         """Runs arbitrary sql and returns data as json"""
         # Collect Values
         access_key: str = request.json.get("access_key")
@@ -2760,13 +2884,9 @@ class Superset(BaseSupersetView):
 
         database_id: int = mydb.id
 
-        mydb_dialect = re.sub(r':.*', '', mydb.sqlalchemy_uri)
-
         select_as_cta: bool = request.json.get("select_as_cta")
         tmp_table_name: str = request.json.get("tmp_table_name")
         client_id: str = request.json.get("client_id") or utils.shortid()[:10]
-        # sql_editor_id: str = request.json.get("sql_editor_id")
-        # tab_name: str = request.json.get("tab")
         status: bool = QueryStatus.RUNNING
 
         # Set tmp_table_name for CTA
@@ -2780,9 +2900,7 @@ class Superset(BaseSupersetView):
             schema=schema,
             select_as_cta=select_as_cta,
             start_time=now_as_float(),
-            # tab_name=tab_name,
             status=status,
-            # sql_editor_id=sql_editor_id,
             tmp_table_name=tmp_table_name,
             user_id=g.user.get_id() if g.user else None,
             client_id=client_id,
@@ -2811,123 +2929,7 @@ class Superset(BaseSupersetView):
                 status=403,
             )
 
-        # Handle the situations when schema is empty
-        if query.schema is None:
-            # Utilize the endpoint of the SQLAlchemy URI as our fallback schema
-            query.schema = urlparse(query.database.sqlalchemy_uri).path.strip('/')
-            logging.info(f'Empty query schema. Replaced it with the endpoint of sqlalchemy_uri: {query.schema}')
-
-        blob = None
-        if results_backend and query.results_key:
-            logging.info(
-                "Fetching CSV from results backend " "[{}]".format(query.results_key)
-            )
-            blob = results_backend.get(query.results_key)
-        if blob:
-            logging.info("Decompressing")
-            payload = utils.zlib_decompress(
-                blob, decode=not results_backend_use_msgpack
-            )
-            obj = _deserialize_results_payload(
-                payload, query, results_backend_use_msgpack
-            )
-            columns = [c["name"] for c in obj["columns"]]
-            df = pd.DataFrame.from_records(obj["data"], columns=columns)
-            logging.info("Using pandas to convert to CSV")
-            csv = df.to_csv(index=False, **config.get("CSV_EXPORT"))
-            response = Response(csv, mimetype="text/csv")
-            response.headers[
-                "Content-Disposition"
-            ] = f"attachment; filename={query.name}.csv"
-            return response
-        # Query ClickHouse
-        logging.info("Running a query to turn into CSV")
-        sql = query.sql or query.select_sql or query.executed_sql
-        event_info = {
-            "event_type": "data_export",
-            "client_id": client_id,
-            "database": query.database.name,
-            "schema": query.schema,
-            "sql": query.sql,
-            "exported_format": "csv",
-        }
-        logging.info(
-            f"CSV exported: {repr(event_info)}", extra={"superset_event": event_info}
-        )
-
-        # Extra log info for App Insights
-        extra_info = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
-
-        database = query.database
-        engine = database.get_sqla_engine(
-            schema=query.schema,
-            nullpool=True,
-            user_name=g.user.username if g.user else None,
-            source=utils.sources.get("sql_lab", None),
-        )
-
-        if 'clickhouse' in mydb_dialect.lower():
-            # Fetch Clickhouse secrets from ENVs
-            CLICKHOUSE_HOST = os.environ.get('CLICKHOUSE_HOST')
-            CLICKHOUSE_PORT = os.environ.get('CLICKHOUSE_PORT', '9000')
-            CLICKHOUSE_UNAME = os.environ.get('CLICKHOUSE_UNAME')
-            CLICKHOUSE_PWD = os.environ.get('CLICKHOUSE_PWD')
-            client = Client(host=CLICKHOUSE_HOST, database=query.schema, user=CLICKHOUSE_UNAME, password=CLICKHOUSE_PWD, port=CLICKHOUSE_PORT)
-            src_data = client.execute_iter(sql, with_column_types=True, settings={'max_block_size': 10000})
-            header_has_type = True
-        else:
-            def stream_data_gen():
-                # Streaming results at least available for psycopg2, mysqldb and pymysql
-                # ref: https://docs.sqlalchemy.org/en/13/core/connections.html#sqlalchemy.engine.Connection.execution_options.params.stream_results
-                data_stream = engine.execution_options(stream_results=True).execute(sql)
-                print_header = True
-                batch=1000
-                data_count = 0
-                chunk = data_stream.fetchmany(batch)
-                while chunk:
-                    for row in chunk:
-                        if print_header:
-                            print_header = False
-                            yield data_stream.keys()
-                        data_count += 1
-                        yield row
-                    chunk = data_stream.fetchmany(batch)
-
-            header_has_type = False
-            src_data = stream_data_gen()
-
-        # Utilize the generator pattern to stream CSV contents
-        # ref: https://flask.palletsprojects.com/en/1.1.x/patterns/streaming/
-        # ref: https://clickhouse-driver.readthedocs.io/en/latest/quickstart.html#streaming-results
-        def generate(header_has_type):
-
-            for row in src_data:
-                # We add sleep(0) between generator iterations to give the worker a break
-                # to update the heartbeat file and keep the connection and worker process alive.
-                sleep(0)
-                s = ''
-                # Determine whether this row is CSV header(columns) or not
-                if header_has_type:
-                    # Transform headers from a list of tuples to a comma-seperated string
-                    s = ','.join([f'"{col[0]}"' for col in row])
-                    header_has_type = False
-                    yield s
-                    continue
-
-                for item in row:
-                    # Escape double quotes
-                    if '"' in str(item):
-                        item = item.replace('"', '""')
-                    s += f'"{item}",'
-                s = s[:-1] + '\n'
-                yield s
-
-        response = Response(generate(header_has_type=header_has_type), mimetype='text/csv')
-        # Add the header to assign the filename and filename extension of the response
-        response.headers[
-            "Content-Disposition"
-        ] = f"attachment; filename={query.name}.csv"
-        return response, extra_info
+        return self._streaming_csv(query, client_id)
 
     @has_access
     @expose("/csv/<client_id>")
@@ -2937,121 +2939,14 @@ class Superset(BaseSupersetView):
         logging.info("Exporting CSV file [{}]".format(client_id))
         query = db.session.query(Query).filter_by(client_id=client_id).one()
 
-        # Handle the situations when schema is empty
-        if query.schema is None:
-            # Utilize the endpoint of the SQLAlchemy URI as our fallback schema
-            query.schema = urlparse(query.database.sqlalchemy_uri).path.strip('/')
-            logging.info(f'Empty query schema. Replaced it with the endpoint of sqlalchemy_uri: {query.schema}')
-
         rejected_tables = security_manager.rejected_tables(
             query.sql, query.database, query.schema
         )
         if rejected_tables:
             flash(security_manager.get_table_access_error_msg(rejected_tables))
             return redirect("/")
-        blob = None
-        if results_backend and query.results_key:
-            logging.info(
-                "Fetching CSV from results backend " "[{}]".format(query.results_key)
-            )
-            blob = results_backend.get(query.results_key)
-        if blob:
-            logging.info("Decompressing")
-            payload = utils.zlib_decompress(
-                blob, decode=not results_backend_use_msgpack
-            )
-            obj = _deserialize_results_payload(
-                payload, query, results_backend_use_msgpack
-            )
-            columns = [c["name"] for c in obj["columns"]]
-            df = pd.DataFrame.from_records(obj["data"], columns=columns)
-            logging.info("Using pandas to convert to CSV")
-            csv = df.to_csv(index=False, **config.get("CSV_EXPORT"))
-            response = Response(csv, mimetype="text/csv")
-            response.headers[
-                "Content-Disposition"
-            ] = f"attachment; filename={query.name}.csv"
-            return response
-        # Query ClickHouse
-        logging.info("Running a query to turn into CSV")
-        sql = query.sql or query.select_sql or query.executed_sql
-        event_info = {
-            "event_type": "data_export",
-            "client_id": client_id,
-            "database": query.database.name,
-            "schema": query.schema,
-            "sql": query.sql,
-            "exported_format": "csv",
-        }
-        logging.info(
-            f"CSV exported: {repr(event_info)}", extra={"superset_event": event_info}
-        )
 
-        # Extra log info for App Insights
-        extra_info = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
-
-        if 'clickhouse' in mydb_dialect.lower():
-            # Fetch Clickhouse secrets from ENVs
-            CLICKHOUSE_HOST = os.environ.get('CLICKHOUSE_HOST')
-            CLICKHOUSE_PORT = os.environ.get('CLICKHOUSE_PORT', '9000')
-            CLICKHOUSE_UNAME = os.environ.get('CLICKHOUSE_UNAME')
-            CLICKHOUSE_PWD = os.environ.get('CLICKHOUSE_PWD')
-            client = Client(host=CLICKHOUSE_HOST, database=query.schema, user=CLICKHOUSE_UNAME, password=CLICKHOUSE_PWD, port=CLICKHOUSE_PORT)
-            src_data = client.execute_iter(sql, with_column_types=True, settings={'max_block_size': 10000})
-            header_has_type = True
-        else:
-            def stream_data_gen():
-                # Streaming results at least available for psycopg2, mysqldb and pymysql
-                # ref: https://docs.sqlalchemy.org/en/13/core/connections.html#sqlalchemy.engine.Connection.execution_options.params.stream_results
-                data_stream = engine.execution_options(stream_results=True).execute(sql)
-                print_header = True
-                batch=1000
-                data_count = 0
-                chunk = data_stream.fetchmany(batch)
-                while chunk:
-                    for row in chunk:
-                        if print_header:
-                            print_header = False
-                            yield data_stream.keys()
-                        data_count += 1
-                        yield row
-                    chunk = data_stream.fetchmany(batch)
-
-            header_has_type = False
-            src_data = stream_data_gen()
-
-        # Utilize the generator pattern to stream CSV contents
-        # ref: https://flask.palletsprojects.com/en/1.1.x/patterns/streaming/
-        # ref: https://clickhouse-driver.readthedocs.io/en/latest/quickstart.html#streaming-results
-        def generate(header_has_type):
-
-            for row in src_data:
-                # We add sleep(0) between generator iterations to give the worker a break
-                # to update the heartbeat file and keep the connection and worker process alive.
-                sleep(0)
-                s = ''
-                # Determine whether this row is CSV header(columns) or not
-                if header_has_type:
-                    # Transform headers from a list of tuples to a comma-seperated string
-                    s = ','.join([f'"{col[0]}"' for col in row])
-                    header_has_type = False
-                    yield s
-                    continue
-
-                for item in row:
-                    # Escape double quotes
-                    if '"' in str(item):
-                        item = item.replace('"', '""')
-                    s += f'"{item}",'
-                s = s[:-1] + '\n'
-                yield s
-
-        response = Response(generate(header_has_type=header_has_type), mimetype='text/csv')
-        # Add the header to assign the filename and filename extension of the response
-        response.headers[
-            "Content-Disposition"
-        ] = f"attachment; filename={query.name}.csv"
-        return response, extra_info
+        return self._streaming_csv(query, client_id)
 
     @api
     @handle_api_exception

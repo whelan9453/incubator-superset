@@ -4,7 +4,7 @@ from flask_appbuilder.models.sqla.interface import SQLAInterface
 from flask_appbuilder.fieldwidgets import BS3TextFieldWidget
 from flask_appbuilder.security.sqla import models as ab_models
 from flask_babel import gettext as __, lazy_gettext as _
-from superset import appbuilder, db
+from superset import appbuilder, db, event_logger
 from superset.views.base import (
     DeleteMixin,
     SupersetModelView,
@@ -82,12 +82,10 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
     ]
 
     def pre_add(self, obj):
-        print(f'pre_add: {str(obj.user.id)}')
         obj.user_id = obj.user.id
 
     # Replace access_key with the new one
     def pre_update(self, obj):
-        print(f'pre_update: {obj.new_access_key}')
         obj.access_key = obj.new_access_key
 
     # This function is used to generate new access key in edit form
@@ -98,9 +96,9 @@ appbuilder.add_separator("Security")
 
 appbuilder.add_view(
     AccessKeyModelView,
-    "List Access Keys",
-    label=__("List Access Keys"),
+    "Manage Access Keys",
+    label=__("Manage Access Keys"),
     category="Security",
     category_label=__("Security"),
-    icon="fa-table",
+    icon="fa-key",
 )
