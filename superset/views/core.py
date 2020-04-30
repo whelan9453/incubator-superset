@@ -2941,8 +2941,11 @@ class Superset(BaseSupersetView):
             CLICKHOUSE_PWD = os.environ.get('CLICKHOUSE_PWD', 'archer')
             client = Client(host=CLICKHOUSE_HOST, database=query.schema, user=CLICKHOUSE_UNAME, password=CLICKHOUSE_PWD, port='9200')
             src_data = client.execute_iter(sql, with_column_types=True, settings={'max_block_size': 10000})
+            header_has_type = True
         else:
             def stream_data_gen():
+                # Streaming results at least available for psycopg2, mysqldb and pymysql
+                # ref: https://docs.sqlalchemy.org/en/13/core/connections.html#sqlalchemy.engine.Connection.execution_options.params.stream_results
                 data_stream = engine.execution_options(stream_results=True).execute(sql)
                 # print(str(data_stream.schema_for_object))
                 print_header = True
@@ -2959,6 +2962,7 @@ class Superset(BaseSupersetView):
                         yield row
                     chunk = data_stream.fetchmany(batch)
 
+            header_has_type = False
             src_data = stream_data_gen()
 
         # with closing(engine.raw_connection()) as conn:
@@ -2966,7 +2970,7 @@ class Superset(BaseSupersetView):
         # Utilize the generator pattern to stream CSV contents
         # ref: https://flask.palletsprojects.com/en/1.1.x/patterns/streaming/
         # ref: https://clickhouse-driver.readthedocs.io/en/latest/quickstart.html#streaming-results
-        def generate():
+        def generate(header_has_type):
             # Determine whether this row is CSV header(columns) or not
             # with engine.connect() as con:
                 # src_data = engine.execution_options(stream_results=True).execute(sql)
@@ -2979,38 +2983,39 @@ class Superset(BaseSupersetView):
                 #     print(f'chunk size: {len(chunk)}, type: {str(type(chunk[0]))}')
                 #     header = ','.join(src_data.keys())
 
-                    for row in src_data:
-                        # We add sleep(0) between generator iterations to give the worker a break 
-                        # to update the heartbeat file and keep the connection and worker process alive.
-                        sleep(0)
-                        s = ''
-                        # if isHeader:
-                        #     # Transform headers from a list of tuples to a comma-seperated string
-                        #     # s = ','.join([col[0] for col in row])
-                        #     s += f'{header}\n'
-                        #     isHeader = False
-                        # else:
-                        for item in row:
-                            # Remove extra commas
-                            # item = str(item).replace(',', ' ')
-                            # # Remove new lines in Windows
-                            # if '\r\n' in item:
-                            #     item = item.replace('\r\n', ' ')
-                            # # Remove new lines in Linux and new MacOS
-                            # if '\n' in item:
-                            #     item = item.replace('\n', ' ')
-                            # # Remove new lines in old MacOS
-                            # if '\r' in item:
-                            #     item = item.replace('\r', ' ')
-                            # Escape double quotes
-                            if '"' in str(item):
-                                item = item.replace('"', '""')
-                            s += f'"{item}",'
-                        s = s[:-1] + '\n'
+                for row in src_data:
+                    # We add sleep(0) between generator iterations to give the worker a break 
+                    # to update the heartbeat file and keep the connection and worker process alive.
+                    sleep(0)
+                    s = ''
+                    if header_has_type:
+                        # Transform headers from a list of tuples to a comma-seperated string
+                        s = ','.join([f'"{col[0]}"' for col in row])
+                        header_has_type = False
+                        print(s)
                         yield s
-                    # chunk = src_data.fetchmany(batch)
+                        continue
 
-        response = Response(generate(), mimetype='text/csv')
+                    for item in row:
+                        # Remove extra commas
+                        # item = str(item).replace(',', ' ')
+                        # # Remove new lines in Windows
+                        # if '\r\n' in item:
+                        #     item = item.replace('\r\n', ' ')
+                        # # Remove new lines in Linux and new MacOS
+                        # if '\n' in item:
+                        #     item = item.replace('\n', ' ')
+                        # # Remove new lines in old MacOS
+                        # if '\r' in item:
+                        #     item = item.replace('\r', ' ')
+                        # Escape double quotes
+                        if '"' in str(item):
+                            item = item.replace('"', '""')
+                        s += f'"{item}",'
+                    s = s[:-1] + '\n'
+                    yield s
+
+        response = Response(generate(header_has_type=header_has_type), mimetype='text/csv')
         # Add the header to assign the filename and filename extension of the response
         response.headers[
             "Content-Disposition"
