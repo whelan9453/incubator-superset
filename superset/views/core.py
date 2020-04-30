@@ -2758,17 +2758,24 @@ class Superset(BaseSupersetView):
                 f"access_key is not available"
             )
 
+        mydb = session.query(models.Database).filter_by(database_name=database_name).one_or_none()
+        if not mydb:
+            return json_error_response(f"Database with name {database_name} is missing. , User name: {g.user}")
+
         if database_id == None:
-            database_ids: tuple = session.query(models.Database.id).filter_by(database_name=database_name).first()
+            database_id = mydb.id
 
-            if database_ids == None:
-                logging.warning(f"User specified database not found: {database_name}, User name: {g.user}")
-                return json_error_response(
-                    f"Database '{database_name}' is not available"
-                )
-            else:
-                database_id = database_ids[0]
+        mydb_dialect = re.sub(r':.*', '', mydb.sqlalchemy_uri)
+        print(f'sqlalchemy_uri: {mydb.sqlalchemy_uri}')
+        print(f'database dialect: {mydb_dialect}')
 
+            # if database_ids == None:
+            #     logging.warning(f"User specified database not found: {database_name}, User name: {g.user}")
+            #     return json_error_response(
+            #         f"Database '{database_name}' is not available"
+            #     )
+            # else:
+            #     database_id = database_ids[0]
 
         print("database_id: "+str(database_id))
         print("request"+json.dumps(request.json))
@@ -2795,11 +2802,6 @@ class Superset(BaseSupersetView):
         sql_editor_id: str = request.json.get("sql_editor_id")
         tab_name: str = request.json.get("tab")
         status: bool = QueryStatus.PENDING if async_flag else QueryStatus.RUNNING
-
-        # session = db.session()
-        mydb = session.query(models.Database).filter_by(id=database_id).one_or_none()
-        if not mydb:
-            return json_error_response(f"Database with id {database_id} is missing.")
 
         # Set tmp_table_name for CTA
         if select_as_cta and mydb.force_ctas_schema:
@@ -2844,32 +2846,171 @@ class Superset(BaseSupersetView):
                 status=403,
             )
 
-        try:
-            template_processor = get_template_processor(
-                database=query.database, query=query
-            )
-            rendered_query = template_processor.process_template(
-                query.sql, **template_params
-            )
-        except Exception as e:
-            error_msg = utils.error_msg_from_exception(e)
-            return json_error_response(
-                f"Query {query_id}: Template rendering failed: {error_msg}"
-            )
+        # try:
+        #     template_processor = get_template_processor(
+        #         database=query.database, query=query
+        #     )
+        #     rendered_query = template_processor.process_template(
+        #         query.sql, **template_params
+        #     )
+        # except Exception as e:
+        #     error_msg = utils.error_msg_from_exception(e)
+        #     return json_error_response(
+        #         f"Query {query_id}: Template rendering failed: {error_msg}"
+        #     )
 
-        # set LIMIT after template processing
-        limits = [mydb.db_engine_spec.get_limit_from_sql(rendered_query), limit]
-        query.limit = min(lim for lim in limits if lim is not None)
+        # # set LIMIT after template processing
+        # limits = [mydb.db_engine_spec.get_limit_from_sql(rendered_query), limit]
+        # query.limit = min(lim for lim in limits if lim is not None)
 
-        # Async request.
-        if async_flag:
-            print("##### async_flag")
-            return self._sql_json_async(session, rendered_query, query)
+        # # Async request.
+        # if async_flag:
+        #     print("##### async_flag")
+        #     return self._sql_json_async(session, rendered_query, query)
+
+        # # Extra log info for App Insights
+        # extra_info = {'user_id': user_id, 'database': query.database.name+"test", 'schema': query.schema, 'sql': query.sql}
+        # # Sync request.
+        # return self._sql_json_sync(session, rendered_query, query), extra_info
+
+        # Handle the situations when schema is empty
+        if query.schema is None:
+            # Utilize the endpoint of the SQLAlchemy URI as our fallback schema
+            query.schema = urlparse(query.database.sqlalchemy_uri).path.strip('/')
+            logging.info(f'Empty query schema. Replaced it with the endpoint of sqlalchemy_uri: {query.schema}')
+
+        rejected_tables = security_manager.rejected_tables(
+            query.sql, query.database, query.schema
+        )
+        if rejected_tables:
+            flash(security_manager.get_table_access_error_msg(rejected_tables))
+            return redirect("/")
+        blob = None
+        if results_backend and query.results_key:
+            logging.info(
+                "Fetching CSV from results backend " "[{}]".format(query.results_key)
+            )
+            blob = results_backend.get(query.results_key)
+        if blob:
+            logging.info("Decompressing")
+            payload = utils.zlib_decompress(
+                blob, decode=not results_backend_use_msgpack
+            )
+            obj = _deserialize_results_payload(
+                payload, query, results_backend_use_msgpack
+            )
+            columns = [c["name"] for c in obj["columns"]]
+            df = pd.DataFrame.from_records(obj["data"], columns=columns)
+            logging.info("Using pandas to convert to CSV")
+            csv = df.to_csv(index=False, **config.get("CSV_EXPORT"))
+            response = Response(csv, mimetype="text/csv")
+            response.headers[
+                "Content-Disposition"
+            ] = f"attachment; filename={query.name}.csv"
+            return response
+        # Query ClickHouse
+        logging.info("Running a query to turn into CSV")
+        sql = query.sql or query.select_sql or query.executed_sql
+        event_info = {
+            "event_type": "data_export",
+            "client_id": client_id,
+            "database": query.database.name,
+            "schema": query.schema,
+            "sql": query.sql,
+            "exported_format": "csv",
+        }
+        logging.info(
+            f"CSV exported: {repr(event_info)}", extra={"superset_event": event_info}
+        )
 
         # Extra log info for App Insights
-        extra_info = {'user_id': user_id, 'database': query.database.name+"test", 'schema': query.schema, 'sql': query.sql}
-        # Sync request.
-        return self._sql_json_sync(session, rendered_query, query), extra_info
+        extra_info = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
+
+        database = query.database
+        engine = database.get_sqla_engine(
+            schema=query.schema,
+            nullpool=True,
+            user_name=g.user.username if g.user else None,
+            source=utils.sources.get("sql_lab", None),
+        )
+
+        if 'clickhouse' in mydb_dialect.lower(): 
+            # Fetch Clickhouse secrets from ENVs
+            CLICKHOUSE_HOST = os.environ.get('CLICKHOUSE_HOST', '172.22.128.167')
+            CLICKHOUSE_UNAME = os.environ.get('CLICKHOUSE_UNAME', 'archer')
+            CLICKHOUSE_PWD = os.environ.get('CLICKHOUSE_PWD', 'archer')
+            client = Client(host=CLICKHOUSE_HOST, database=query.schema, user=CLICKHOUSE_UNAME, password=CLICKHOUSE_PWD, port='9200')
+            src_data = client.execute_iter(sql, with_column_types=True, settings={'max_block_size': 10000})
+        else:
+            def stream_data_gen():
+                data_stream = engine.execution_options(stream_results=True).execute(sql)
+                batch=1000
+                data_count = 0
+                chunk = data_stream.fetchmany(batch)
+                while chunk:
+                    # print(f'data transfered: {data_count}')
+                    for row in chunk:
+                        data_count += 1
+                        yield list(row)
+                    chunk = data_stream.fetchmany(batch)
+
+            src_data = stream_data_gen()
+
+        # with closing(engine.raw_connection()) as conn:
+        #     with closing(conn.cursor()) as cursor:
+        # Utilize the generator pattern to stream CSV contents
+        # ref: https://flask.palletsprojects.com/en/1.1.x/patterns/streaming/
+        # ref: https://clickhouse-driver.readthedocs.io/en/latest/quickstart.html#streaming-results
+        def generate():
+            # Determine whether this row is CSV header(columns) or not
+            # with engine.connect() as con:
+                # src_data = engine.execution_options(stream_results=True).execute(sql)
+                # cursor.set_stream_results(True, 1000)
+                # src_data = cursor.execute(sql))
+                # isHeader = True
+                # batch=100
+                # chunk = src_data.fetchmany(batch)
+                # while chunk:
+                #     print(f'chunk size: {len(chunk)}, type: {str(type(chunk[0]))}')
+                #     header = ','.join(src_data.keys())
+
+                    for row in src_data:
+                        # We add sleep(0) between generator iterations to give the worker a break 
+                        # to update the heartbeat file and keep the connection and worker process alive.
+                        sleep(0)
+                        s = ''
+                        # if isHeader:
+                        #     # Transform headers from a list of tuples to a comma-seperated string
+                        #     # s = ','.join([col[0] for col in row])
+                        #     s += f'{header}\n'
+                        #     isHeader = False
+                        # else:
+                        for item in row:
+                            # Remove extra commas
+                            # item = str(item).replace(',', ' ')
+                            # # Remove new lines in Windows
+                            # if '\r\n' in item:
+                            #     item = item.replace('\r\n', ' ')
+                            # # Remove new lines in Linux and new MacOS
+                            # if '\n' in item:
+                            #     item = item.replace('\n', ' ')
+                            # # Remove new lines in old MacOS
+                            # if '\r' in item:
+                            #     item = item.replace('\r', ' ')
+                            # Escape double quotes
+                            if '"' in str(item):
+                                item = item.replace('"', '""')
+                            s += f'"{item}",'
+                            s = s[:-1] + '\n'
+                        yield s
+                    # chunk = src_data.fetchmany(batch)
+
+        response = Response(generate(), mimetype='text/csv')
+        # Add the header to assign the filename and filename extension of the response
+        response.headers[
+            "Content-Disposition"
+        ] = f"attachment; filename={query.name}.csv"
+        return response, extra_info
 
     @has_access
     @expose("/csv/<client_id>")
