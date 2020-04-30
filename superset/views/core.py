@@ -2944,14 +2944,19 @@ class Superset(BaseSupersetView):
         else:
             def stream_data_gen():
                 data_stream = engine.execution_options(stream_results=True).execute(sql)
+                # print(str(data_stream.schema_for_object))
+                print_header = True
                 batch=1000
                 data_count = 0
                 chunk = data_stream.fetchmany(batch)
                 while chunk:
                     # print(f'data transfered: {data_count}')
                     for row in chunk:
+                        if print_header:
+                            print_header = False
+                            yield data_stream.keys()
                         data_count += 1
-                        yield list(row)
+                        yield row
                     chunk = data_stream.fetchmany(batch)
 
             src_data = stream_data_gen()
@@ -3001,7 +3006,7 @@ class Superset(BaseSupersetView):
                             if '"' in str(item):
                                 item = item.replace('"', '""')
                             s += f'"{item}",'
-                            s = s[:-1] + '\n'
+                        s = s[:-1] + '\n'
                         yield s
                     # chunk = src_data.fetchmany(batch)
 
