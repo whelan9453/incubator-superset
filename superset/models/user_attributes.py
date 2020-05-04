@@ -49,11 +49,10 @@ class UserAttribute(Model, AuditMixinNullable):
     welcome_dashboard_id = Column(Integer, ForeignKey("dashboards.id"))
     welcome_dashboard = relationship("Dashboard")
 
-    access_key = Column(String,  default=uuid4)
+    access_key = Column(String(36),  default=uuid4)
 
     @property
     def username(self):
-        # print('render user_id as its name')
         return self.user.username
 
     @username.setter

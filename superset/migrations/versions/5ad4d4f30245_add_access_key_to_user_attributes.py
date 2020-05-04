@@ -31,7 +31,7 @@ import sqlalchemy as sa
 
 
 def upgrade():
-    op.add_column('user_attribute', sa.Column('access_key', sa.String(), nullable=True))
+    op.add_column('user_attribute', sa.Column('access_key', sa.String(36), nullable=True))
 
 
 def downgrade():
