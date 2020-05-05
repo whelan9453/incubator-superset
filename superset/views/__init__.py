@@ -26,4 +26,4 @@ from . import (
     tags,
 )
 from .log import api as log_api, views
-from .aics_privacy_control import api as aics_api, views as aics_views, api as aics_api
+from .aics_privacy_control import views as aics_views

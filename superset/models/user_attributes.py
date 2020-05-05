@@ -20,7 +20,6 @@ import logging
 from flask_appbuilder import Model
 from sqlalchemy import Column, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
-from sqlalchemy.ext.hybrid import hybrid_property
 
 from superset import security_manager
 from superset.models.helpers import AuditMixinNullable

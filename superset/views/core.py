@@ -2812,6 +2812,7 @@ class Superset(BaseSupersetView):
 
             def stream_data_gen():
                 # Streaming results at least available for psycopg2, mysqldb and pymysql
+                # TODO: deal with DBAPIs that is not support streaming result
                 # ref: https://docs.sqlalchemy.org/en/13/core/connections.html#sqlalchemy.engine.Connection.execution_options.params.stream_results
                 data_stream = engine.execution_options(stream_results=True).execute(sql)
                 print_header = True
