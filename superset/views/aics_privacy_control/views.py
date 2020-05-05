@@ -14,20 +14,24 @@ from wtforms.ext.sqlalchemy.fields import QuerySelectField
 from wtforms import TextField, SelectField
 from wtforms.validators import DataRequired
 
-from uuid import uuid4
-
-
 class BS3TextFieldROWidget(BS3TextFieldWidget):
+    '''Inherent BS3TextFieldWidget and create a read only version
+        ref: https://github.com/dpgaspar/Flask-AppBuilder/blob/master/docs/advanced.rst#forms---readonly-fields
+    '''
     def __call__(self, field, **kwargs):
         kwargs['readonly'] = 'true'
         return super(BS3TextFieldROWidget, self).__call__(field, **kwargs)
 
 def get_user_options():
+    '''Get user list and filter out the ones already has a access key
+        Used in the QuerySelectField of add form
+    '''
     User = ab_models.User
     return db.session.query(User).filter(User.active == True).filter(~ exists().where(UserAttribute.user_id == User.id))
 
 class AccessKeyModelView(SupersetModelView, DeleteMixin):
     datamodel = SQLAInterface(UserAttribute)
+
     list_columns = [
         "username",
         "access_key",
@@ -35,8 +39,10 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
         "changed_on",
         "changed_by_name",
     ]
+
     order_columns = ["user_id"]
     base_order = ("changed_on", "desc")
+
     label_columns = {
         "username": _("User"),
         "access_key": _("Access Key"),
@@ -44,6 +50,7 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
         "changed_on": _("Changed On"),
         "changed_by_name": _("Changed By"),
     }
+
     add_columns = [
         "user",
         "access_key",
@@ -84,11 +91,11 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
     def pre_add(self, obj):
         obj.user_id = obj.user.id
 
-    # Replace access_key with the new one
+    # Replace access_key with the new one for write back to DB
     def pre_update(self, obj):
         obj.access_key = obj.new_access_key
 
-    # This function is used to generate new access key in edit form
+    # This function is used to generate new access key and fill in edit form
     def prefill_form(self, form, pk):
         form.new_access_key.data = str(uuid4())
 

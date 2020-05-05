@@ -20,6 +20,9 @@ Revision ID: 5ad4d4f30245
 Revises: b6fa807eac07
 Create Date: 2020-01-02 10:25:02.835661
 
+Check following link for the the generation of DB migration file
+https://github.com/ASUS-AICS/incubator-superset/blob/0.35/CONTRIBUTING.md#adding-a-db-migration
+
 """
 
 # revision identifiers, used by Alembic.

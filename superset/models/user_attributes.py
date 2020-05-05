@@ -21,11 +21,9 @@ from flask_appbuilder import Model
 from sqlalchemy import Column, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.hybrid import hybrid_property
-from flask_appbuilder.models.decorators import renders
 
 from superset import security_manager
 from superset.models.helpers import AuditMixinNullable
-from flask_appbuilder.security.sqla import models as ab_models
 
 
 class UserAttribute(Model, AuditMixinNullable):
@@ -51,10 +49,14 @@ class UserAttribute(Model, AuditMixinNullable):
 
     access_key = Column(String(36),  default=uuid4)
 
+    # Following parts are declared for convert DB data to readable version for displaying on the views
+    # This is related to SQLA. Use @property from python or @hybrid_property from SQLA are both OK here.
+    # Ref: https://docs.sqlalchemy.org/en/13/orm/extensions/hybrid.html#defining-expression-behavior-distinct-from-attribute-behavior
     @property
     def username(self):
         return self.user.username
 
+    # As we need to show username in add/edit views, we need to define a setter to deal with the assignment of the property
     @username.setter
     def username(self, value):
         pass

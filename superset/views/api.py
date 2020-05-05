@@ -69,4 +69,5 @@ class Api(BaseSupersetView):
 
         return json.dumps(form_data)
 
+
 appbuilder.add_view_no_menu(Api)

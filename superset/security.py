@@ -305,9 +305,11 @@ class SupersetSecurityManager(SecurityManager):
         if self.all_datasource_access():
             return True
 
-        schema_perm = self.get_schema_perm(database, schema)
+        schema_perm: str = self.get_schema_perm(database, schema)
 
-        if self.database_access(database):
+        # TODO: Deal with DBs without schema concept
+        if self.database_access(database) \
+            and self.can_access("schema_access", schema_perm):
 
                 datasources = ConnectorRegistry.query_datasources_by_name(
                     db.session, database, table_name, schema=schema

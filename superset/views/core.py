@@ -2700,11 +2700,16 @@ class Superset(BaseSupersetView):
         if rejected_tables:
             query.status = QueryStatus.FAILED
             session.commit()
+
+            err_msg = security_manager.get_table_access_error_msg(rejected_tables)
+            # Extra log info for App Insights
+            extra_info = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql, 'err_msg': err_msg}
+
             return json_error_response(
-                security_manager.get_table_access_error_msg(rejected_tables),
+                err_msg,
                 link=security_manager.get_table_access_link(rejected_tables),
                 status=403,
-            )
+            ), extra_info
 
         try:
             template_processor = get_template_processor(
@@ -2761,11 +2766,16 @@ class Superset(BaseSupersetView):
         logging.info("Running a query to turn into CSV")
         sql = query.sql or query.select_sql or query.executed_sql
 
+        # Extra log info for App Insights
+        extra_info = {'user_id': query.user_id, 'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
+
         # Handle the situations when schema is empty
         if query.schema is None:
-            # Utilize the endpoint of the SQLAlchemy URI as our fallback schema
-            query.schema = urlparse(query.database.sqlalchemy_uri).path.strip('/')
-            logging.info(f'Empty query schema. Replaced it with the endpoint of sqlalchemy_uri: {query.schema}')
+            # Return error msg instead of finding one if schema is not specified
+            # TODO: deal with DBs with no schema concept
+            err_msg = "schema is not specified"
+            extra_info['err_msg'] = err_msg
+            return json_error_response(err_msg), extra_info
 
         event_info = {
             "event_type": "data_export",
@@ -2779,14 +2789,12 @@ class Superset(BaseSupersetView):
             f"CSV exported: {repr(event_info)}", extra={"superset_event": event_info}
         )
 
-        # Extra log info for App Insights
-        extra_info = {'user_id': query.user_id, 'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
-
         database = query.database
         db_dialect = re.sub(r':.*', '', database.sqlalchemy_uri)
 
         if 'clickhouse' in db_dialect.lower():
             # Fetch Clickhouse secrets from ENVs
+            # TODO: Find better way to keep the connection info
             CLICKHOUSE_HOST = os.environ.get('CLICKHOUSE_HOST')
             CLICKHOUSE_PORT = os.environ.get('CLICKHOUSE_PORT', '9000')
             CLICKHOUSE_UNAME = os.environ.get('CLICKHOUSE_UNAME')
@@ -2869,14 +2877,19 @@ class Superset(BaseSupersetView):
 
         session = db.session()
         user_id: int = session.query(UserAttribute.user_id).filter_by(access_key=access_key).first()
+
+        # Extra log info for App Insights
+        extra_info = {'user_id': user_id, 'database': database_name, 'schema': schema, 'sql': sql}
+
         if user_id:
             user_id = user_id[0]
             g.user = security_manager.get_user_by_id(user_id)
         else:
-            logging.warning(f"Invalid access_key to sql_json_api: {str(access_key)}")
-            return json_error_response(
-                f"access_key is not available"
-            )
+            err_msg = f"Invalid access_key: {str(access_key)}"
+            logging.warning(err_msg)
+            exrta_info['err_msg'] = err_msg
+
+            return json_error_response(err_msg), extra_info
 
         mydb = session.query(models.Database).filter_by(database_name=database_name).one_or_none()
         if not mydb:
@@ -2923,11 +2936,16 @@ class Superset(BaseSupersetView):
         if rejected_tables:
             query.status = QueryStatus.FAILED
             session.commit()
+
+            err_msg = security_manager.get_table_access_error_msg(rejected_tables)
+            # Extra log info for App Insights
+            extra_info = {'user_id': user_id, 'database': database_name, 'schema': schema, 'sql': sql, 'err_msg': err_msg}
+
             return json_error_response(
-                security_manager.get_table_access_error_msg(rejected_tables),
+                err_msg,
                 link=security_manager.get_table_access_link(rejected_tables),
                 status=403,
-            )
+            ), extra_info
 
         return self._streaming_csv(query, client_id)
 
@@ -2943,8 +2961,12 @@ class Superset(BaseSupersetView):
             query.sql, query.database, query.schema
         )
         if rejected_tables:
-            flash(security_manager.get_table_access_error_msg(rejected_tables))
-            return redirect("/")
+            err_msg = security_manager.get_table_access_error_msg(rejected_tables)
+            # Extra log info for App Insights
+            extra_info = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql, 'err_msg': err_msg}
+
+            flash(err_msg)
+            return redirect("/"), extra_info
 
         return self._streaming_csv(query, client_id)
 
