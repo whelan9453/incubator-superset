@@ -78,6 +78,7 @@ from superset.exceptions import (
 from superset.jinja_context import get_template_processor
 from superset.models.sql_lab import Query
 from superset.models.user_attributes import UserAttribute
+from superset.models.table_permission import TablePermission
 from superset.sql_parse import ParsedQuery
 from superset.sql_validators import get_validator_by_name
 from superset.utils import core as utils, dashboard_import_export
@@ -2980,6 +2981,31 @@ class Superset(BaseSupersetView):
             return redirect("/"), extra_info
 
         return self._streaming_csv(query, client_id)
+
+    @api
+    @expose("/revoke_expired_perm", methods=["GET"])
+    @event_logger.log_this
+    def revoke_expired_perm(self):
+        session = db.session()
+        expired_perms = session.query(TablePermission).filter(
+            TablePermission.is_active == True,
+            TablePermission.expire_date < datetime.now().date()
+        )
+        revoke_msg = {'revoke-perm':[]}
+        for perm in expired_perms:
+            perm_info = {'user': perm.username, 'perms':[]}
+            for table in perm.table_permissions:
+                perm_info['perms'].append(str(table))
+                print(f"revoke {str(table)}")
+            revoke_msg['revoke-perm'].append(perm_info)
+            perm.is_active = False
+            perm.changed_by_fk = perm.changed_by_fk
+        session.commit()
+        session.close()
+
+        extra_info = {'details': revoke_msg}
+
+        return "OK", extra_info
 
     @api
     @handle_api_exception
