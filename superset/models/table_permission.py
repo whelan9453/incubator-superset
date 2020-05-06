@@ -29,6 +29,7 @@ from sqlalchemy import (
     DateTime,
     Boolean,
     Sequence,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -85,30 +86,34 @@ from superset.models.helpers import AuditMixinNullable
 #         return self.changed_by_
 
 
-class TablePermission2PermissionView(Model, AuditMixinNullable):
+# class TablePermission2PermissionView(Model, AuditMixinNullable):
 
-    """
+#     """
 
-    """
+#     """
 
-    __tablename__ = "aics_tableperm_permissionview"
-    id = Column(Integer, Sequence("aics_tableperm_permissionview_id_seq"), primary_key=True) 
-    tableperm_id = Column(Integer, ForeignKey("aics_table_permission.id"))
-    permissionview_id = Column(Integer, ForeignKey("ab_permission_view.id"))
-    permissionview = relationship(
-        security_manager.permissionview_model, backref="tableperm_permissionview", foreign_keys=[permissionview_id]
-    )
-    
-    apply_date = Column(Date, nullable=False, default=datetime.now())
-    expire_date = Column(Date, nullable=False, default=datetime.now()+timedelta(days=6*365/12))
-    force_treminate_date = Column(DateTime)
-    is_active = Column(Boolean, default=True, nullable=False)
+#     __tablename__ = "aics_tableperm_permissionview"
+#     id = Column(Integer, Sequence("aics_tableperm_permissionview_id_seq"), primary_key=True) 
+#     tableperm_id = Column(Integer, ForeignKey("aics_table_permission.id"))
+#     permissionview_id = Column(Integer, ForeignKey("ab_permission_view.id"))
+#     permissionview = relationship(
+#         security_manager.permissionview_model, backref="tableperm_permissionview", foreign_keys=[permissionview_id]
+#     )
 
-    def __repr__(self):
-        if self.is_active:
-            return re.sub(r'.* ', '', self.permissionview)+str(self.expire_date)
-        else:
-            return ''
+#     def __repr__(self):
+#         if self.is_active:
+#             return re.sub(r'.* ', '', self.permissionview)+str(self.expire_date)
+#         else:
+#             return ''
+
+assoc_tableperm_permissionview = Table(
+    "aics_tableperm_permissionview",
+    Model.metadata,
+    Column('id', Integer, Sequence("aics_tableperm_permissionview_id_seq"), primary_key=True) ,
+    Column('tableperm_id', Integer, ForeignKey("aics_table_permission.id")),
+    Column('permissionview_id', Integer, ForeignKey("ab_permission_view.id")),
+    UniqueConstraint("tableperm_id", "permissionview_id"),
+)
 
 class TablePermission(Model, AuditMixinNullable):
 
@@ -123,16 +128,23 @@ class TablePermission(Model, AuditMixinNullable):
         security_manager.user_model, backref="user_table_perm", foreign_keys=[user_id]
     )
 
+    apply_date = Column(Date, nullable=False, default=datetime.now())
+    expire_date = Column(Date, nullable=False, default=datetime.now()+timedelta(days=6*365/12))
+    force_treminate_date = Column(DateTime)
+    is_active = Column(Boolean, default=True, nullable=False)
+
     table_permissions = relationship(
-        security_manager.permissionview_model, secondary=TablePermission2PermissionView.__table__, backref="table_perm"
+        security_manager.permissionview_model, secondary=assoc_tableperm_permissionview, backref="table_perm"
     )
 
-    @property
-    def expire_date(self):
-        return self._exp_date
+    # @property
+    # def expire_date(self):
+    #     return self._exp_date
 
-    @expire_date.setter
-    def expire_date(self, exp_date):
-        self._exp_date = exp_date
-        # if not 
-        self.table_permissions.expire_date = exp_date
+    # @expire_date.setter
+    # def expire_date(self, exp_date):
+    #     self._exp_date = exp_date
+    #     print(str(len(self.table_permissions)))
+    #     for permission in self.table_permissions:
+    #         print(permission)
+    #         permission.expire_date = exp_date

@@ -1,7 +1,7 @@
 from uuid import uuid4
 from sqlalchemy.sql import exists
 from flask_appbuilder.models.sqla.interface import SQLAInterface
-from flask_appbuilder.fieldwidgets import BS3TextFieldWidget, Select2Widget
+from flask_appbuilder.fieldwidgets import BS3TextFieldWidget, Select2Widget, Select2ManyWidget, DatePickerWidget
 from flask_appbuilder.security.sqla import models as ab_models
 from flask_babel import gettext as __, lazy_gettext as _
 from superset import appbuilder, db, event_logger, security_manager
@@ -11,8 +11,8 @@ from superset.views.base import (
 )
 from superset.models.user_attributes import UserAttribute
 from superset.models.table_permission import TablePermission
-from wtforms.ext.sqlalchemy.fields import QuerySelectField
-from wtforms import TextField, SelectField
+from wtforms.ext.sqlalchemy.fields import QuerySelectField, QuerySelectMultipleField
+from wtforms import TextField, SelectField, DateField
 from wtforms.validators import DataRequired
 
 class BS3TextFieldROWidget(BS3TextFieldWidget):
@@ -146,10 +146,12 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
     ]
 
     add_form_extra_fields = {
-        'tables': QuerySelectField('Tables',
+        'tables': QuerySelectMultipleField('Tables',
             query_factory=get_table_perm_list,
-            widget=Select2Widget()),
-        # 'expire_date': 
+            widget=Select2ManyWidget()),
+        # 'expire_date': DateField('Expire Date',
+        #     widget=DatePickerWidget()
+        # ),
     }
 
 appbuilder.add_separator("Security")
