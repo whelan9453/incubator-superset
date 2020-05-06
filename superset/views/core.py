@@ -2880,15 +2880,25 @@ class Superset(BaseSupersetView):
         user_id: int = session.query(UserAttribute.user_id).filter_by(access_key=access_key).first()
 
         # Extra log info for App Insights
-        extra_info = {'user_id': user_id, 'database': database_name, 'schema': schema, 'sql': sql}
+        extra_info = {'database': database_name, 'schema': schema, 'sql': sql}
 
         if user_id:
             user_id = user_id[0]
+            extra_info['user_id'] = user_id
             g.user = security_manager.get_user_by_id(user_id)
         else:
             err_msg = f"Invalid access_key: {str(access_key)}"
             logging.warning(err_msg)
-            exrta_info['err_msg'] = err_msg
+            extra_info['err_msg'] = err_msg
+
+            return json_error_response(err_msg), extra_info
+
+        parsed_query = ParsedQuery(sql)
+
+        if not parsed_query.is_readonly():
+            err_msg = _("Only `SELECT` statements are allowed against this database")
+            logging.warning(err_msg)
+            extra_info['err_msg'] = str(err_msg)
 
             return json_error_response(err_msg), extra_info
 
