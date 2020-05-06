@@ -315,7 +315,14 @@ class SupersetSecurityManager(SecurityManager):
                     db.session, database, table_name, schema=schema
                 )
 
+                all_datasources = ConnectorRegistry.get_all_datasources(db.session)
+
+                for datasource in all_datasources:
+                    print(f'datasource.perm: {datasource.perm}')
+
+                print(f'-------------------------')
                 for datasource in datasources:
+                    print(f'datasource.perm: {datasource.perm}')
                     if self.can_access("datasource_access", datasource.perm):
                         return True
 

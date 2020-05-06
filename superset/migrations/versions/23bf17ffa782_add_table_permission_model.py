@@ -37,7 +37,7 @@ def upgrade():
     sa.Column('changed_on', sa.DateTime(), nullable=True),
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('user_id', sa.Integer(), nullable=True),
-    sa.Column('table_id', sa.Integer(), nullable=True),
+    sa.Column('table_perm_id', sa.Integer(), nullable=True),
     sa.Column('apply_date', sa.Date(), nullable=False),
     sa.Column('expire_date', sa.Date(), nullable=False),
     sa.Column('force_treminate_date', sa.DateTime(), nullable=True),
@@ -46,7 +46,7 @@ def upgrade():
     sa.Column('changed_by_fk', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['changed_by_fk'], ['ab_user.id'], ),
     sa.ForeignKeyConstraint(['created_by_fk'], ['ab_user.id'], ),
-    sa.ForeignKeyConstraint(['table_id'], ['tables.id'], ),
+    sa.ForeignKeyConstraint(['table_perm_id'], ['ab_permission_view.id'], ),
     sa.ForeignKeyConstraint(['user_id'], ['ab_user.id'], ),
     sa.PrimaryKeyConstraint('id')
     )

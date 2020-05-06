@@ -40,10 +40,14 @@ class TablePermission(Model, AuditMixinNullable):
     id = Column(Integer, primary_key=True)  # pylint: disable=invalid-name
     user_id = Column(Integer, ForeignKey("ab_user.id"))
     user = relationship(
-        security_manager.user_model, backref="table_permissions", foreign_keys=[user_id]
+        security_manager.user_model, backref="user_table_perm", foreign_keys=[user_id]
     )
 
-    table_id = Column(Integer, ForeignKey("tables.id"))
+    # table_id = Column(Integer, ForeignKey("tables.id"))
+    table_perm_id = Column(Integer, ForeignKey("ab_permission_view.id"))
+    table_perm = relationship(
+        security_manager.permissionview_model, backref="table_perm", foreign_keys=[table_perm_id]
+    )
     apply_date = Column(Date, nullable=False, default=datetime.now())
     expire_date = Column(Date, nullable=False)
     force_treminate_date = Column(DateTime)
