@@ -161,7 +161,6 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
 
     order_columns = ['username', 'expire_date', 'is_active']
     base_order = ('user_id', 'desc')
-    base_filters = [['is_active', FilterEqual, True]]
 
 
     label_columns = {
