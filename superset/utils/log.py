@@ -76,6 +76,10 @@ class AbstractEventLogger(ABC):
 
             referrer = request.referrer[:1000] if request.referrer else None
 
+            # pass user_id through extra_info when access throuth sql_csv_api
+            if user_id == None:
+                user_id = extra_info.get("user_id")
+
             self.log(
                 user_id,
                 f.__name__,
@@ -87,6 +91,7 @@ class AbstractEventLogger(ABC):
                 database=extra_info.get("database"),
                 schema=extra_info.get("schema"),
                 sql=extra_info.get("sql"),
+                err_msg=extra_info.get("err_msg")
             )
             return value
 
@@ -154,6 +159,8 @@ class DBEventLogger(AbstractEventLogger):
         database = kwargs.get("database")
         schema = kwargs.get("schema")
         sql = kwargs.get("sql")
+        err_msg = kwargs.get("err_msg")
+        success = "true" if err_msg == None else "false"
 
         logs = list()
         for record in records:
@@ -172,10 +179,10 @@ class DBEventLogger(AbstractEventLogger):
             )
             logs.append(log)
             self.appinsights(
-                {'level': 'info', 'success': 'true', 'state':'finish', 
+                {'level': 'info', 'success': success, 'state':'finish',
                 'function': action, 'json': json_string, 'duration': duration_ms, 
                 'referrer': referrer, 'user_id': user_id,
-                'database': database, 'schema': schema, 'sql': sql
+                'database': database, 'schema': schema, 'sql': sql, 'err_msg': err_msg
                 })
 
         sesh = current_app.appbuilder.get_session

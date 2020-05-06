@@ -2700,11 +2700,16 @@ class Superset(BaseSupersetView):
         if rejected_tables:
             query.status = QueryStatus.FAILED
             session.commit()
+
+            err_msg = security_manager.get_table_access_error_msg(rejected_tables)
+            # Extra log info for App Insights
+            extra_info = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql, 'err_msg': err_msg}
+
             return json_error_response(
-                security_manager.get_table_access_error_msg(rejected_tables),
+                err_msg,
                 link=security_manager.get_table_access_link(rejected_tables),
                 status=403,
-            )
+            ), extra_info
 
         try:
             template_processor = get_template_processor(
@@ -2732,26 +2737,8 @@ class Superset(BaseSupersetView):
         # Sync request.
         return self._sql_json_sync(session, rendered_query, query), extra_info
 
-    @has_access
-    @expose("/csv/<client_id>")
-    @event_logger.log_this
-    def csv(self, client_id):
-        """Download the query results as csv."""
-        logging.info("Exporting CSV file [{}]".format(client_id))
-        query = db.session.query(Query).filter_by(client_id=client_id).one()
+    def _streaming_csv(self, query, client_id):
 
-        # Handle the situations when schema is empty
-        if query.schema is None:
-            # Utilize the endpoint of the SQLAlchemy URI as our fallback schema
-            query.schema = urlparse(query.database.sqlalchemy_uri).path.strip('/')
-            logging.info(f'Empty query schema. Replaced it with the endpoint of sqlalchemy_uri: {query.schema}')
-
-        rejected_tables = security_manager.rejected_tables(
-            query.sql, query.database, query.schema
-        )
-        if rejected_tables:
-            flash(security_manager.get_table_access_error_msg(rejected_tables))
-            return redirect("/")
         blob = None
         if results_backend and query.results_key:
             logging.info(
@@ -2775,9 +2762,21 @@ class Superset(BaseSupersetView):
                 "Content-Disposition"
             ] = f"attachment; filename={query.name}.csv"
             return response
-        # Query ClickHouse
+        # Query Database
         logging.info("Running a query to turn into CSV")
         sql = query.sql or query.select_sql or query.executed_sql
+
+        # Extra log info for App Insights
+        extra_info = {'user_id': query.user_id, 'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
+
+        # Handle the situations when schema is empty
+        if query.schema is None:
+            # Return error msg instead of finding one if schema is not specified
+            # TODO: deal with DBs with no schema concept
+            err_msg = "schema is not specified"
+            extra_info['err_msg'] = err_msg
+            return json_error_response(err_msg), extra_info
+
         event_info = {
             "event_type": "data_export",
             "client_id": client_id,
@@ -2790,60 +2789,197 @@ class Superset(BaseSupersetView):
             f"CSV exported: {repr(event_info)}", extra={"superset_event": event_info}
         )
 
-        # Extra log info for App Insights
-        extra_info = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
+        database = query.database
+        db_dialect = re.sub(r':.*', '', database.sqlalchemy_uri)
 
-        # Fetch Clickhouse secrets from ENVs
-        CLICKHOUSE_HOST = os.environ.get('CLICKHOUSE_HOST')
-        CLICKHOUSE_UNAME = os.environ.get('CLICKHOUSE_UNAME')
-        CLICKHOUSE_PWD = os.environ.get('CLICKHOUSE_PWD')
-        client = Client(host=CLICKHOUSE_HOST, database=query.schema, user=CLICKHOUSE_UNAME, password=CLICKHOUSE_PWD)
-        rows_gen = client.execute_iter(sql, with_column_types=True, settings={'max_block_size': 10000})
+        if 'clickhouse' in db_dialect.lower():
+            # Fetch Clickhouse secrets from ENVs
+            # TODO: Find better way to keep the connection info
+            CLICKHOUSE_HOST = os.environ.get('CLICKHOUSE_HOST')
+            CLICKHOUSE_PORT = os.environ.get('CLICKHOUSE_PORT', '9000')
+            CLICKHOUSE_UNAME = os.environ.get('CLICKHOUSE_UNAME')
+            CLICKHOUSE_PWD = os.environ.get('CLICKHOUSE_PWD')
+            client = Client(host=CLICKHOUSE_HOST, database=query.schema, user=CLICKHOUSE_UNAME, password=CLICKHOUSE_PWD, port=CLICKHOUSE_PORT)
+            src_data = client.execute_iter(sql, with_column_types=True, settings={'max_block_size': 10000})
+            header_has_type = True
+        else:
+            engine = database.get_sqla_engine(
+                schema=query.schema,
+                nullpool=True,
+                user_name=g.user.username if g.user else None,
+                source=utils.sources.get("sql_lab", None),
+            )
+
+            def stream_data_gen():
+                # Streaming results at least available for psycopg2, mysqldb and pymysql
+                # TODO: deal with DBAPIs that is not support streaming result
+                # ref: https://docs.sqlalchemy.org/en/13/core/connections.html#sqlalchemy.engine.Connection.execution_options.params.stream_results
+                data_stream = engine.execution_options(stream_results=True).execute(sql)
+                print_header = True
+                batch=1000
+                data_count = 0
+                chunk = data_stream.fetchmany(batch)
+                while chunk:
+                    for row in chunk:
+                        if print_header:
+                            print_header = False
+                            yield data_stream.keys()
+                        data_count += 1
+                        yield row
+                    chunk = data_stream.fetchmany(batch)
+                data_stream.close()
+
+            header_has_type = False
+            src_data = stream_data_gen()
+
         # Utilize the generator pattern to stream CSV contents
         # ref: https://flask.palletsprojects.com/en/1.1.x/patterns/streaming/
         # ref: https://clickhouse-driver.readthedocs.io/en/latest/quickstart.html#streaming-results
-        def generate():
-            # Determine whether this row is CSV header(columns) or not
-            isHeader = True
-            for row in rows_gen:
-                # We add sleep(0) between generator iterations to give the worker a break 
+        def generate(header_has_type):
+
+            for row in src_data:
+                # We add sleep(0) between generator iterations to give the worker a break
                 # to update the heartbeat file and keep the connection and worker process alive.
                 sleep(0)
                 s = ''
-                if isHeader:
+                # Determine whether this row is CSV header(columns) or not
+                if header_has_type:
                     # Transform headers from a list of tuples to a comma-seperated string
-                    s = ','.join([col[0] for col in row])
-                    s += '\n'
-                    isHeader = False
-                else:
-                    for item in row:
-                        if item != None:
-                            # Remove extra commas
-                            item = str(item).replace(',', ' ')
-                            # Remove new lines in Windows
-                            if '\r\n' in item:
-                                item = item.replace('\r\n', ' ')
-                            # Remove new lines in Linux and new MacOS
-                            if '\n' in item:
-                                item = item.replace('\n', ' ')
-                            # Remove new lines in old MacOS
-                            if '\r' in item:
-                                item = item.replace('\r', ' ')
-                            # Escape double quotes
-                            if '"' in item:
-                                item = item.replace('"', '""')
-                            s += item + ','
-                        else:
-                            s += ','
-                    s = s[:-1] + '\n'
+                    s = ','.join([f'"{col[0]}"' for col in row])
+                    header_has_type = False
+                    yield s+ '\n'
+                    continue
+
+                for item in row:
+                    # Escape double quotes
+                    if '"' in str(item):
+                        item = item.replace('"', '""')
+                    s += f'"{item}",'
+                s = s[:-1] + '\n'
                 yield s
 
-        response = Response(generate(), mimetype='text/csv')
+        response = Response(generate(header_has_type=header_has_type), mimetype='text/csv')
         # Add the header to assign the filename and filename extension of the response
         response.headers[
             "Content-Disposition"
         ] = f"attachment; filename={query.name}.csv"
         return response, extra_info
+
+    @api
+    @expose("/sql_csv_api", methods=["POST"])
+    @event_logger.log_this
+    def sql_csv_api(self):
+        """Runs arbitrary sql and returns data as json"""
+        # Collect Values
+        access_key: str = request.json.get("access_key")
+        database_name: int = request.json.get("database_name")
+        schema: str = request.json.get("schema")
+        sql: str = request.json.get("sql")
+
+        session = db.session()
+        user_id: int = session.query(UserAttribute.user_id).filter_by(access_key=access_key).first()
+
+        # Extra log info for App Insights
+        extra_info = {'database': database_name, 'schema': schema, 'sql': sql}
+
+        if user_id:
+            user_id = user_id[0]
+            extra_info['user_id'] = user_id
+            g.user = security_manager.get_user_by_id(user_id)
+        else:
+            err_msg = f"Invalid access_key: {str(access_key)}"
+            logging.warning(err_msg)
+            extra_info['err_msg'] = err_msg
+
+            return json_error_response(err_msg), extra_info
+
+        parsed_query = ParsedQuery(sql)
+
+        if not parsed_query.is_readonly():
+            err_msg = _("Only `SELECT` statements are allowed against this database")
+            logging.warning(err_msg)
+            extra_info['err_msg'] = str(err_msg)
+
+            return json_error_response(err_msg), extra_info
+
+        mydb = session.query(models.Database).filter_by(database_name=database_name).one_or_none()
+        if not mydb:
+            return json_error_response(f"Database with name {database_name} is missing. , User name: {g.user}")
+
+        database_id: int = mydb.id
+
+        select_as_cta: bool = request.json.get("select_as_cta")
+        tmp_table_name: str = request.json.get("tmp_table_name")
+        client_id: str = request.json.get("client_id") or utils.shortid()[:10]
+        status: bool = QueryStatus.RUNNING
+
+        # Set tmp_table_name for CTA
+        if select_as_cta and mydb.force_ctas_schema:
+            tmp_table_name = f"{mydb.force_ctas_schema}.{tmp_table_name}"
+
+        # Save current query
+        query = Query(
+            database_id=database_id,
+            sql=sql,
+            schema=schema,
+            select_as_cta=select_as_cta,
+            start_time=now_as_float(),
+            status=status,
+            tmp_table_name=tmp_table_name,
+            user_id=g.user.get_id() if g.user else None,
+            client_id=client_id,
+        )
+        try:
+            session.add(query)
+            session.flush()
+            query_id = query.id
+            session.commit()  # shouldn't be necessary
+        except SQLAlchemyError as e:
+            logging.error(f"Errors saving query details {e}")
+            session.rollback()
+            raise Exception(_("Query record was not created as expected."))
+        if not query_id:
+            raise Exception(_("Query record was not created as expected."))
+
+        logging.info(f"Triggering query_id: {query_id}")
+
+        rejected_tables = security_manager.rejected_tables(sql, mydb, schema)
+        if rejected_tables:
+            query.status = QueryStatus.FAILED
+            session.commit()
+
+            err_msg = security_manager.get_table_access_error_msg(rejected_tables)
+            # Extra log info for App Insights
+            extra_info = {'user_id': user_id, 'database': database_name, 'schema': schema, 'sql': sql, 'err_msg': err_msg}
+
+            return json_error_response(
+                err_msg,
+                link=security_manager.get_table_access_link(rejected_tables),
+                status=403,
+            ), extra_info
+
+        return self._streaming_csv(query, client_id)
+
+    @has_access
+    @expose("/csv/<client_id>")
+    @event_logger.log_this
+    def csv(self, client_id):
+        """Download the query results as csv."""
+        logging.info("Exporting CSV file [{}]".format(client_id))
+        query = db.session.query(Query).filter_by(client_id=client_id).one()
+
+        rejected_tables = security_manager.rejected_tables(
+            query.sql, query.database, query.schema
+        )
+        if rejected_tables:
+            err_msg = security_manager.get_table_access_error_msg(rejected_tables)
+            # Extra log info for App Insights
+            extra_info = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql, 'err_msg': err_msg}
+
+            flash(err_msg)
+            return redirect("/"), extra_info
+
+        return self._streaming_csv(query, client_id)
 
     @api
     @handle_api_exception

@@ -14,16 +14,28 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from . import (
-    annotations,
-    api,
-    base,
-    core,
-    dashboard,
-    datasource,
-    schedules,
-    sql_lab,
-    tags,
-)
-from .log import api as log_api, views
-from .aics_privacy_control import views as aics_views
+"""add_access_key_to_user_attributes
+
+Revision ID: 5ad4d4f30245
+Revises: b6fa807eac07
+Create Date: 2020-01-02 10:25:02.835661
+
+Check following link for the the generation of DB migration file
+https://github.com/ASUS-AICS/incubator-superset/blob/0.35/CONTRIBUTING.md#adding-a-db-migration
+
+"""
+
+# revision identifiers, used by Alembic.
+revision = '5ad4d4f30245'
+down_revision = 'b6fa807eac07'
+
+from alembic import op
+import sqlalchemy as sa
+
+
+def upgrade():
+    op.add_column('user_attribute', sa.Column('access_key', sa.String(36), nullable=True))
+
+
+def downgrade():
+    op.drop_column('user_attribute', 'access_key')
