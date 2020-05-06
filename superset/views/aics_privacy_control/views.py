@@ -123,16 +123,14 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
 class TablePermissionModelView(SupersetModelView, DeleteMixin):
     datamodel = SQLAInterface(TablePermission)
     list_columns = [
-        "username",
-        "avail_table_list",
-        "table_id",
-        "expire_date",
-        "is_active",
+        "user",
+        "table_permissions",
     ]
-    order_columns = ["user_id"]
-    base_order = ("changed_on", "desc")
+    order_columns = ["user"]
+    # base_order = ("changed_on", "desc")
     label_columns = {
-        "username": _("User"),
+        "user": _("User"),
+        "table_permissions": _("Table Permissions"),
         "avail_table_list": _("Table Permissions"),
         "created_on": _("Created On"),
         "changed_on": _("Changed On"),
@@ -140,16 +138,18 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
     }
     add_columns = [
         "user",
-        "tables",
-        "table_perm",
-        "expire_date",
-        "is_active",
+        "table_permissions",
+        # "tables",
+        # "table_perm",
+        # "expire_date",
+        # "is_active",
     ]
 
     add_form_extra_fields = {
         'tables': QuerySelectField('Tables',
             query_factory=get_table_perm_list,
             widget=Select2Widget()),
+        # 'expire_date': 
     }
 
 appbuilder.add_separator("Security")
