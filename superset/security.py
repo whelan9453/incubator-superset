@@ -288,6 +288,26 @@ class SupersetSecurityManager(SecurityManager):
 
         return conf.get("PERMISSION_INSTRUCTIONS_LINK")
 
+    def _has_aics_table_permission(self, user: object, permission_name: str, view_name: str):
+        from superset import db
+        from superset.models.table_permission import TablePermission
+
+        if user.is_anonymous:
+            print('user is anomynous')
+            return False
+        
+        perm = self.find_permission_view_menu( permission_name, view_name)
+        print(user)
+        print(f'{permission_name} on {view_name}')
+        print(perm)
+        table_permissions = db.session.query(TablePermission).filter(TablePermission.user_id == user.id, TablePermission.is_active == True)
+        for table_perm in table_permissions:
+            for pv in table_perm.table_permissions:
+                print(pv)
+                if pv == perm:
+                    return True
+                
+
     def _datasource_access_by_name(
         self, database: "Database", table_name: str, schema: str = None
     ) -> bool:
@@ -315,15 +335,14 @@ class SupersetSecurityManager(SecurityManager):
                     db.session, database, table_name, schema=schema
                 )
 
-                all_datasources = ConnectorRegistry.get_all_datasources(db.session)
-
-                for datasource in all_datasources:
-                    print(f'datasource.perm: {datasource.perm}')
-
-                print(f'-------------------------')
                 for datasource in datasources:
-                    print(f'datasource.perm: {datasource.perm}')
+                    # Check permission using AppBuilder Roles
                     if self.can_access("datasource_access", datasource.perm):
+                        return True
+
+                    print('Check AICS Permission')
+                    # Check AICS table permissions
+                    if self._has_aics_table_permission(g.user, "datasource_access", datasource.perm):
                         return True
 
         return False
