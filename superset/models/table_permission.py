@@ -128,14 +128,22 @@ class TablePermission(Model, AuditMixinNullable):
         security_manager.user_model, backref="user_table_perm", foreign_keys=[user_id]
     )
 
-    apply_date = Column(Date, nullable=False, default=datetime.now())
-    expire_date = Column(Date, nullable=False, default=datetime.now()+timedelta(days=6*365/12))
-    force_treminate_date = Column(DateTime)
-    is_active = Column(Boolean, default=True, nullable=False)
+    apply_date = Column(Date, nullable=False, default=datetime.now().date())
+    expire_date = Column(Date, nullable=False, default=datetime.now().date()+timedelta(days=6*365/12))
+    force_terminate_date = Column(DateTime)
+    is_active = Column(Boolean, default=True)
 
     table_permissions = relationship(
         security_manager.permissionview_model, secondary=assoc_tableperm_permissionview, backref="table_perm"
     )
+
+    @property
+    def username(self):
+        return self.user.username
+
+    @username.setter
+    def username(self, value):
+        pass
 
     # @property
     # def expire_date(self):
