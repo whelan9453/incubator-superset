@@ -14,8 +14,11 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+from uuid import uuid4
+import logging
+
 from flask_appbuilder import Model
-from sqlalchemy import Column, ForeignKey, Integer
+from sqlalchemy import Column, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
 from superset import security_manager
@@ -42,3 +45,29 @@ class UserAttribute(Model, AuditMixinNullable):
 
     welcome_dashboard_id = Column(Integer, ForeignKey("dashboards.id"))
     welcome_dashboard = relationship("Dashboard")
+
+    access_key = Column(String(36),  default=uuid4)
+
+    # Following parts are declared for convert DB data to readable version for displaying on the views
+    # This is related to SQLA. Use @property from python or @hybrid_property from SQLA are both OK here.
+    # Ref: https://docs.sqlalchemy.org/en/13/orm/extensions/hybrid.html#defining-expression-behavior-distinct-from-attribute-behavior
+    @property
+    def username(self):
+        return self.user.username
+
+    # As we need to show username in add/edit views, we need to define a setter to deal with the assignment of the property
+    @username.setter
+    def username(self, value):
+        pass
+
+    @property
+    def new_access_key(self):
+        return self._new_key
+
+    @new_access_key.setter
+    def new_access_key(self, value):
+        self._new_key = value
+
+    @property
+    def changed_by_name(self):
+        return self.changed_by_
