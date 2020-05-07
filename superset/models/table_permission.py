@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import logging
 import re
 from datetime import datetime, timedelta
 
@@ -24,7 +23,6 @@ from sqlalchemy import (
     Column,
     ForeignKey,
     Integer,
-    String,
     Date,
     DateTime,
     Boolean,
@@ -36,76 +34,6 @@ from sqlalchemy.orm import relationship
 from superset import security_manager
 from superset.models.helpers import AuditMixinNullable
 
-
-# class TablePermission(Model, AuditMixinNullable):
-
-#     """
-#     Custom attributes attached to the user.
-
-#     Extending the user attribute is tricky due to its dependency on the
-#     authentication typew an circular dependencies in Superset. Instead, we use
-#     a custom model for adding attributes.
-
-#     """
-
-#     __tablename__ = "table_permission"
-#     id = Column(Integer, primary_key=True)  # pylint: disable=invalid-name
-#     user_id = Column(Integer, ForeignKey("ab_user.id"))
-#     user = relationship(
-#         security_manager.user_model, backref="user_table_perm", foreign_keys=[user_id]
-#     )
-
-#     # table_id = Column(Integer, ForeignKey("tables.id"))
-#     table_perm_id = Column(Integer, ForeignKey("ab_permission_view.id"))
-#     table_perm = relationship(
-#         security_manager.permissionview_model, backref="table_perm", foreign_keys=[table_perm_id]
-#     )
-#     apply_date = Column(Date, nullable=False, default=datetime.now())
-#     expire_date = Column(Date, nullable=False)
-#     force_treminate_date = Column(DateTime)
-#     is_active = Column(Boolean, default=True, nullable=False)
-
-#     @property
-#     def username(self):
-#         return self.user.username
-
-#     @username.setter
-#     def username(self, value):
-#         pass
-
-#     @property
-#     def table_names_with_id(self):
-#         return self._new_key
-
-#     @table_names_with_id.setter
-#     def table_names_with_id(self, value):
-#         self._new_key = value
-
-#     @property
-#     def changed_by_name(self):
-#         return self.changed_by_
-
-
-# class TablePermission2PermissionView(Model, AuditMixinNullable):
-
-#     """
-
-#     """
-
-#     __tablename__ = "aics_tableperm_permissionview"
-#     id = Column(Integer, Sequence("aics_tableperm_permissionview_id_seq"), primary_key=True) 
-#     tableperm_id = Column(Integer, ForeignKey("aics_table_permission.id"))
-#     permissionview_id = Column(Integer, ForeignKey("ab_permission_view.id"))
-#     permissionview = relationship(
-#         security_manager.permissionview_model, backref="tableperm_permissionview", foreign_keys=[permissionview_id]
-#     )
-
-#     def __repr__(self):
-#         if self.is_active:
-#             return re.sub(r'.* ', '', self.permissionview)+str(self.expire_date)
-#         else:
-#             return ''
-
 assoc_tableperm_permissionview = Table(
     "aics_tableperm_permissionview",
     Model.metadata,
@@ -116,9 +44,12 @@ assoc_tableperm_permissionview = Table(
 )
 
 class TablePermission(Model, AuditMixinNullable):
-
     """
+    Customized table permission control table
 
+    Superset 0.35 leverage Flask AppBuilder Role/Permission for permission control
+    However, it makes permission auto-revocation impossible.
+    So we build this permission control table and with auto-revocation mechanism
     """
 
     __tablename__ = "aics_table_permission"
@@ -145,14 +76,34 @@ class TablePermission(Model, AuditMixinNullable):
     def username(self, value):
         pass
 
-    # @property
-    # def expire_date(self):
-    #     return self._exp_date
+    @property
+    def exp_or_terminate_date(self):
+        if self.force_terminate_date != None:
+            return f'{str(self.force_terminate_date.date())}(Forced)'
+        return self.expire_date
 
-    # @expire_date.setter
-    # def expire_date(self, exp_date):
-    #     self._exp_date = exp_date
-    #     print(str(len(self.table_permissions)))
-    #     for permission in self.table_permissions:
-    #         print(permission)
-    #         permission.expire_date = exp_date
+    @exp_or_terminate_date.setter
+    def exp_or_terminate_date(self, value):
+        pass
+
+    @property
+    def table_permission_list(self):
+        table_perm = [str(perm.view_menu) for perm in self.table_permissions]
+        return ', '.join(table_perm)
+
+    @table_permission_list.setter
+    def table_permission_list(self, value):
+        pass
+
+    @property
+    def status(self):
+        if self.is_active:
+            return 'Active'
+        elif self.force_terminate_date != None:
+            return 'Force Revoked'
+        else:
+            return 'Expired'
+
+    @status.setter
+    def status(self, value):
+        pass

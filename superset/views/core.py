@@ -2996,7 +2996,8 @@ class Superset(BaseSupersetView):
             perm_info = {'user': perm.username, 'perms':[]}
             for table in perm.table_permissions:
                 perm_info['perms'].append(str(table))
-                print(f"revoke {str(table)}")
+                logging.info(f"auto revoke {str(table)}")
+
             revoke_msg['revoke-perm'].append(perm_info)
             perm.is_active = False
             perm.changed_by_fk = perm.changed_by_fk

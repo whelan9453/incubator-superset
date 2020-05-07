@@ -12,6 +12,9 @@ from flask_appbuilder.fieldwidgets import (
 from flask_appbuilder.security.sqla import models as ab_models
 from flask_appbuilder.models.sqla.filters import FilterEqual
 from flask_babel import gettext as __, lazy_gettext as _
+from flask import Markup
+
+from superset.exceptions import SupersetException
 from superset import appbuilder, db, event_logger, security_manager
 from superset.views.base import (
     DeleteMixin,
@@ -21,7 +24,14 @@ from superset.connectors.connector_registry import ConnectorRegistry
 from superset.models.user_attributes import UserAttribute
 from superset.models.table_permission import TablePermission
 from wtforms.ext.sqlalchemy.fields import QuerySelectField, QuerySelectMultipleField
-from wtforms import TextField, SelectField, SelectMultipleField, DateField
+from wtforms import (
+    BooleanField,
+    DateField,
+    HiddenField,
+    SelectField,
+    SelectMultipleField,
+    TextField
+)
 from wtforms.validators import DataRequired
 
 class BS3TextFieldROWidget(BS3TextFieldWidget):
@@ -154,8 +164,8 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
     datamodel = SQLAInterface(TablePermission)
     list_columns = [
         'username',
-        'table_permissions',
-        'expire_date',
+        'table_permission_list',
+        'exp_or_terminate_date',
         'is_active',
     ]
 
@@ -164,9 +174,9 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
 
 
     label_columns = {
-        'user': _('User'),
+        'exp_or_terminate_date': _('Expire/Terminate Date'),
         'username': _('User'),
-        'table_permissions': _('Table Permissions'),
+        'table_permission_list': _('Table Permissions'),
         'avail_table_list': _('Table Permissions'),
         'created_on': _('Created On'),
         'changed_on': _('Changed On'),
@@ -175,43 +185,57 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
 
     edit_columns = [
         'username',
-         'table_permissions',
-        'expire_date',
-        'force_terminate_date',
-        'is_active',
+        'table_permission_list',
+        'exp_or_terminate_date',
+        'status',
+        'force_revoke',
     ]
 
     edit_form_extra_fields = {
         'username': TextField('User Name', widget=BS3TextFieldROWidget()),
-        'expire_date': TextField('Expire Date', widget=BS3TextFieldROWidget()),
+        'table_permission_list': TextField('Table Permissions', widget=BS3TextFieldROWidget()),
+        'exp_or_terminate_date': TextField('Expire/Terminate Date', widget=BS3TextFieldROWidget()),
+        'status': TextField('Status', widget=BS3TextFieldROWidget()),
+        'force_revoke': BooleanField('Force Revoke'),
+        # 'table_permissions': SelectMultipleField('Table Permissions'),
         # 'table_permissions': SelectMultipleField('Table Permissions', widget=Select2ManyROWidget()),
-        'table_permissions': TextField('Table Permissions', widget=BS3TextFieldROWidget()),
+        # 'table_permissions': TextField('Table Permissions', widget=BS3TextFieldROWidget()),
     }
 
     add_columns = [
         'user',
-        # 'table_permissions',
         'tables',
-        # 'table_perm',
         'expire_date',
-        # 'is_active',
     ]
 
     add_form_extra_fields = {
         'tables': QuerySelectMultipleField('Tables',
             query_factory=get_table_perm_list,
             widget=Select2ManyWidget()),
-        # 'expire_date': DateField('Expire Date',
-        #     widget=DatePickerWidget()
-        # ),
     }
 
     def pre_add(self, obj):
         obj.table_permissions = obj.tables
 
     def pre_update(self, obj):
-        if obj.is_active == False:
-            obj.force_treminate_date = datetime.now()
+        # Not allow re-activate permission
+        if obj.status != 'Active':
+            print("Modification on expired/force terminated permission is not allowed")
+            raise SupersetException(
+                Markup(
+                    "Modification on expired/force terminated permission is not allowed"
+                )
+            )
+
+        if obj.force_revoke == True:
+            obj.pop('force_revoke')
+            obj.is_active == False
+            obj.force_terminate_date = datetime.now()
+        else:
+            raise SupersetException(
+                Markup("Nothing Changed")
+            )
+
 
 appbuilder.add_separator('Security')
 
