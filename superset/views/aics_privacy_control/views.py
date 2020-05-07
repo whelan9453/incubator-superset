@@ -71,6 +71,11 @@ def get_table_perm_list():
 class AccessKeyModelView(SupersetModelView, DeleteMixin):
     datamodel = SQLAInterface(UserAttribute)
 
+    list_title = _("Access Keys")
+    show_title = _("Show Access Key Details")
+    add_title = _("Create Access Key")
+    edit_title = _("Renew Access Key")
+
     list_columns = [
         'detail_name',
         'access_key',
@@ -157,6 +162,12 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
 
 class TablePermissionModelView(SupersetModelView, DeleteMixin):
     datamodel = SQLAInterface(TablePermission)
+
+    list_title = _("Table Permissions")
+    show_title = _("Table Permission Details")
+    add_title = _("Grant Table Permissions")
+    edit_title = _("Revoke Table Permissions")
+
     list_columns = [
         'detail_name',
         'table_permission_list',
@@ -174,6 +185,7 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
         'detail_name': _('User'),
         'table_permission_list': _('Table Permissions'),
         'avail_table_list': _('Table Permissions'),
+        'is_active': _('Active'),
         'created_on': _('Created On'),
         'changed_on': _('Changed On'),
         'changed_by_name': _('Changed By'),

@@ -34,6 +34,8 @@ from sqlalchemy.orm import relationship
 from superset import security_manager
 from superset.models.helpers import AuditMixinNullable
 
+# Table for many-to-many relation between users and tables
+# Ref: https://docs.sqlalchemy.org/en/13/orm/basic_relationships.html#relationships-many-to-many
 assoc_tableperm_permissionview = Table(
     "aics_tableperm_permissionview",
     Model.metadata,
@@ -68,9 +70,9 @@ class TablePermission(Model, AuditMixinNullable):
         security_manager.permissionview_model, secondary=assoc_tableperm_permissionview, backref="table_perm"
     )
 
+    # Following properties are used for display fields that are not expected to be changed
     @property
     def detail_name(self):
-        # return f'{self.user.get_full_name()}(id:{self.user.id})'
         return f'{self.user.get_full_name()} ({self.user.username})'
 
     @detail_name.setter
@@ -80,7 +82,7 @@ class TablePermission(Model, AuditMixinNullable):
     @property
     def exp_or_terminate_date(self):
         if self.force_terminate_date != None:
-            return f'{str(self.force_terminate_date.date())}(F)'
+            return f'{str(self.force_terminate_date.date())}(T)'
         return self.expire_date
 
     @exp_or_terminate_date.setter

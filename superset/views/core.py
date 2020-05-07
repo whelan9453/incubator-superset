@@ -2986,11 +2986,16 @@ class Superset(BaseSupersetView):
     @expose("/revoke_expired_perm", methods=["GET"])
     @event_logger.log_this
     def revoke_expired_perm(self):
+        """Revoke expired permissions, triggered by HTTP GET requests from other scheduler"""
         session = db.session()
+
+        # Get all expired permissions
         expired_perms = session.query(TablePermission).filter(
             TablePermission.is_active == True,
             TablePermission.expire_date < datetime.now().date()
         )
+
+        # Revoke permissions and prepare log msg
         revoke_msg = {'revoke-perm':[]}
         for perm in expired_perms:
             perm_info = {'user': perm.username, 'perms':[]}
@@ -3001,6 +3006,7 @@ class Superset(BaseSupersetView):
             revoke_msg['revoke-perm'].append(perm_info)
             perm.is_active = False
             perm.changed_by_fk = perm.changed_by_fk
+
         session.commit()
         session.close()
 

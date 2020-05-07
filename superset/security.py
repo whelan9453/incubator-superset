@@ -17,6 +17,7 @@
 # pylint: disable=C,R,W
 """A set of constants and methods to manage permissions and security"""
 import logging
+from datetime import datetime
 from typing import Callable, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 from flask import current_app, g
@@ -289,23 +290,29 @@ class SupersetSecurityManager(SecurityManager):
         return conf.get("PERMISSION_INSTRUCTIONS_LINK")
 
     def _has_aics_table_permission(self, user: object, permission_name: str, view_name: str):
+        """
+        Customize table permission check
+        """
+
         from superset import db
         from superset.models.table_permission import TablePermission
 
+        # Anonymous user is not allowed
         if user.is_anonymous:
-            print('user is anomynous')
             return False
-        
+
+        # get permission of specified permission name and view name
         perm = self.find_permission_view_menu( permission_name, view_name)
-        print(user)
-        print(f'{permission_name} on {view_name}')
-        print(perm)
-        table_permissions = db.session.query(TablePermission).filter(TablePermission.user_id == user.id, TablePermission.is_active == True)
-        for table_perm in table_permissions:
-            for pv in table_perm.table_permissions:
-                print(pv)
-                if pv == perm:
-                    return True
+
+        user_table_permissions = db.session.query(TablePermission).filter(
+            TablePermission.user_id == user.id,
+            TablePermission.is_active == True,
+            TablePermission.expire_date > datetime.now().date()
+        )
+
+        for table_perm in user_table_permissions:
+            if perm in table_perm.table_permissions:
+                return True
                 
 
     def _datasource_access_by_name(
@@ -340,7 +347,6 @@ class SupersetSecurityManager(SecurityManager):
                     if self.can_access("datasource_access", datasource.perm):
                         return True
 
-                    print('Check AICS Permission')
                     # Check AICS table permissions
                     if self._has_aics_table_permission(g.user, "datasource_access", datasource.perm):
                         return True
