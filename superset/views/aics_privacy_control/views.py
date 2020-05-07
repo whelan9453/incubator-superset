@@ -6,16 +6,19 @@ from flask_appbuilder.models.sqla.interface import SQLAInterface
 from flask_appbuilder.fieldwidgets import (
     BS3TextFieldWidget,
     Select2Widget,
-    Select2ManyWidget,
-    DatePickerWidget
+    Select2ManyWidget
 )
 from flask_appbuilder.security.sqla import models as ab_models
-from flask_appbuilder.models.sqla.filters import FilterEqual
 from flask_babel import gettext as __, lazy_gettext as _
 from flask import Markup
 
 from superset.exceptions import SupersetException
-from superset import appbuilder, db, event_logger, security_manager
+from superset import (
+    appbuilder,
+    db,
+    event_logger,
+    security_manager
+)
 from superset.views.base import (
     DeleteMixin,
     SupersetModelView,
@@ -24,13 +27,7 @@ from superset.connectors.connector_registry import ConnectorRegistry
 from superset.models.user_attributes import UserAttribute
 from superset.models.table_permission import TablePermission
 from wtforms.ext.sqlalchemy.fields import QuerySelectField, QuerySelectMultipleField
-from wtforms import (
-    BooleanField,
-    DateField,
-    SelectField,
-    SelectMultipleField,
-    TextField
-)
+from wtforms import BooleanField, TextField
 from wtforms.validators import DataRequired
 
 class BS3TextFieldROWidget(BS3TextFieldWidget):
@@ -40,15 +37,6 @@ class BS3TextFieldROWidget(BS3TextFieldWidget):
     def __call__(self, field, **kwargs):
         kwargs['readonly'] = 'true'
         return super(BS3TextFieldROWidget, self).__call__(field, **kwargs)
-
-
-class Select2ManyROWidget(Select2ManyWidget):
-    '''Inherit Select2ManyWidget and create a read only version
-        ref: https://github.com/dpgaspar/Flask-AppBuilder/blob/master/docs/advanced.rst#forms---readonly-fields
-    '''
-    def __call__(self, field, **kwargs):
-        kwargs['readonly'] = 'true'
-        return super(Select2ManyWidget, self).__call__(field, **kwargs)
 
 def get_user_options():
     '''Get user list and filter out the ones already has a access key
@@ -61,25 +49,23 @@ def get_table_perm_list():
     '''Get table list
         Used in the QuerySelectField of add form of TablePermission
     '''
-    # get id of 'datasource access' 
-    # get all permission_id == 'datasource access' from ab_permission_view
-    # store the id into table
-    perm_datasource_access = security_manager.find_permission('datasource_access')
-    print(perm_datasource_access.name)
     pv_model = security_manager.permissionview_model
 
+    # get permission id of 'datasource_access'
+    perm_datasource_access = security_manager.find_permission('datasource_access')
+
+    # get all datasources
     all_datasources =  ConnectorRegistry.get_all_datasources(db.session)
-    # all_datasources_perm = [(datasource.perm) for datasource in all_datasources]
     view_menu_ids = []
     for datasource in all_datasources:
          view_menu_ids.append(security_manager.find_view_menu(datasource.perm).id)
 
-    print(f'view_menu_ids count: {len(view_menu_ids)} {len(all_datasources)}')
-
-    all_permissions = db.session.query(pv_model).filter(pv_model.permission == perm_datasource_access).filter(pv_model.view_menu_id.in_(view_menu_ids))
-    print(all_permissions[0])
-    print(all_permissions[0].__dict__)
-
+    # get all permission related to 'datasource_access' and the datasources
+    all_permissions = db.session.query(pv_model).filter(
+            pv_model.permission == perm_datasource_access
+        ).filter(
+            pv_model.view_menu_id.in_(view_menu_ids)
+        )
     return all_permissions
 
 class AccessKeyModelView(SupersetModelView, DeleteMixin):
@@ -160,7 +146,6 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
 
     @event_logger.log_this
     def pre_delete(self, obj):
-        print(f'delete access key of user: {obj.detail_name}')
         extra_info = {
             'log_msg': f'revoke access key {obj.access_key} of {obj.detail_name}'
         }
@@ -180,7 +165,7 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
         'changed_by_name',
     ]
 
-    order_columns = ['detail_name', 'expire_date', 'is_active']
+    order_columns = ['expire_date', 'is_active']
     base_order = ('user_id', 'desc')
 
 
@@ -226,7 +211,8 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
     def pre_add(self, obj):
         obj.table_permissions = obj.tables
         extra_info = {
-            'log_msg': f'grant permissions of tables: {obj.table_permission_list} to {obj.user} til {obj.expire_date}'
+            'log_msg': 'grant permissions of tables: ' +
+                    f'{obj.table_permission_list} to {obj.user}({obj.user.username}) til {obj.expire_date}'
         }
         return obj, extra_info
 
@@ -234,7 +220,6 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
     def pre_update(self, obj):
         # Not allow re-activate permission
         if obj.status != 'Active':
-            print("Modification on expired/force terminated permission is not allowed")
             raise SupersetException(
                 Markup(
                     "Modification on expired/force terminated permission is not allowed"
@@ -242,11 +227,11 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
             )
 
         if obj.force_revoke == True:
-            obj.pop('force_revoke')
-            obj.is_active == False
+            obj.is_active = False
             obj.force_terminate_date = datetime.now()
             extra_info = {
-                'log_msg': f'force revoke permissions of tables: {obj.table_permission_list} of {obj.user}'
+                'log_msg': f'force revoke permissions of tables: ' +
+                        f'{obj.table_permission_list} of {obj.user}({obj.user.username})'
             }
             return obj, extra_info
         else:
@@ -262,7 +247,8 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
             )
 
         extra_info = {
-            'log_msg': f'delete expired/revoked permissions of tables: {obj.table_permission_list} of {obj.user}'
+            'log_msg': f'delete expired/revoked permissions of tables: ' +
+                    f'{obj.table_permission_list} of {obj.user}({obj.user.username})'
         }
         return obj, extra_info
 
