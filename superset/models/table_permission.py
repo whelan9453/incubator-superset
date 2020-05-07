@@ -69,17 +69,18 @@ class TablePermission(Model, AuditMixinNullable):
     )
 
     @property
-    def username(self):
-        return self.user.username
+    def detail_name(self):
+        # return f'{self.user.get_full_name()}(id:{self.user.id})'
+        return f'{self.user.get_full_name()} ({self.user.username})'
 
-    @username.setter
-    def username(self, value):
+    @detail_name.setter
+    def detail_name(self, value):
         pass
 
     @property
     def exp_or_terminate_date(self):
         if self.force_terminate_date != None:
-            return f'{str(self.force_terminate_date.date())}(Forced)'
+            return f'{str(self.force_terminate_date.date())}(F)'
         return self.expire_date
 
     @exp_or_terminate_date.setter

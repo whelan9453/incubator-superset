@@ -27,7 +27,6 @@ from wtforms.ext.sqlalchemy.fields import QuerySelectField, QuerySelectMultipleF
 from wtforms import (
     BooleanField,
     DateField,
-    HiddenField,
     SelectField,
     SelectMultipleField,
     TextField
@@ -87,7 +86,7 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
     datamodel = SQLAInterface(UserAttribute)
 
     list_columns = [
-        'username',
+        'detail_name',
         'access_key',
         'created_on',
         'changed_on',
@@ -98,7 +97,7 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
     base_order = ('changed_on', 'desc')
 
     label_columns = {
-        'username': _('User'),
+        'detail_name': _('User'),
         'access_key': _('Access Key'),
         'created_on': _('Created On'),
         'changed_on': _('Changed On'),
@@ -113,7 +112,6 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
     add_form_extra_fields = {
         'user': QuerySelectField('User',
             query_factory=get_user_options,
-            get_label='username',
             widget=Select2Widget()),
     }
 
@@ -122,7 +120,7 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
     }
 
     edit_form_extra_fields = {
-        'username': TextField('User Name', widget=BS3TextFieldROWidget()),
+        'detail_name': TextField('User Name', widget=BS3TextFieldROWidget()),
         'access_key': TextField('Original Access Key', widget=BS3TextFieldROWidget()),
         'new_access_key': TextField('New Access Key',
             description=('Not editable, click \'Save\' to replace the access key with this new key.'),
@@ -130,13 +128,13 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
     }
 
     edit_columns = [
-        'username',
+        'detail_name',
         'access_key',
         'new_access_key',
     ]
 
     show_columns = [
-        'username',
+        'detail_name',
         'access_key',
         'created_on',
         'changed_on',
@@ -147,7 +145,7 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
     def pre_add(self, obj):
         obj.user_id = obj.user.id
         extra_info = {
-            'log_msg': f'create access key {obj.access_key} for {obj.username}'
+            'log_msg': f'create access key {obj.access_key} for {obj.detail_name}'
         }
         return obj, extra_info
 
@@ -156,15 +154,15 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
     def pre_update(self, obj):
         obj.access_key = obj.new_access_key
         extra_info = {
-            'log_msg': f'renew access key {obj.access_key} of {obj.username}'
+            'log_msg': f'renew access key {obj.access_key} of {obj.detail_name}'
         }
         return obj, extra_info
 
     @event_logger.log_this
     def pre_delete(self, obj):
-        print(f'delete access key of user: {obj.username}')
+        print(f'delete access key of user: {obj.detail_name}')
         extra_info = {
-            'log_msg': f'revoke access key {obj.access_key} of {obj.username}'
+            'log_msg': f'revoke access key {obj.access_key} of {obj.detail_name}'
         }
         return obj, extra_info
 
@@ -175,19 +173,20 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
 class TablePermissionModelView(SupersetModelView, DeleteMixin):
     datamodel = SQLAInterface(TablePermission)
     list_columns = [
-        'username',
+        'detail_name',
         'table_permission_list',
         'exp_or_terminate_date',
         'is_active',
+        'changed_by_name',
     ]
 
-    order_columns = ['username', 'expire_date', 'is_active']
+    order_columns = ['detail_name', 'expire_date', 'is_active']
     base_order = ('user_id', 'desc')
 
 
     label_columns = {
         'exp_or_terminate_date': _('Expire/Terminate Date'),
-        'username': _('User'),
+        'detail_name': _('User'),
         'table_permission_list': _('Table Permissions'),
         'avail_table_list': _('Table Permissions'),
         'created_on': _('Created On'),
@@ -196,7 +195,7 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
     }
 
     edit_columns = [
-        'username',
+        'detail_name',
         'table_permission_list',
         'exp_or_terminate_date',
         'status',
@@ -204,7 +203,7 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
     ]
 
     edit_form_extra_fields = {
-        'username': TextField('User Name', widget=BS3TextFieldROWidget()),
+        'detail_name': TextField('User Name', widget=BS3TextFieldROWidget()),
         'table_permission_list': TextField('Table Permissions', widget=BS3TextFieldROWidget()),
         'exp_or_terminate_date': TextField('Expire/Terminate Date', widget=BS3TextFieldROWidget()),
         'status': TextField('Status', widget=BS3TextFieldROWidget()),
