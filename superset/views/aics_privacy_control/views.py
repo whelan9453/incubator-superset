@@ -146,15 +146,27 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
     @event_logger.log_this
     def pre_add(self, obj):
         obj.user_id = obj.user.id
+        extra_info = {
+            'log_msg': f'create access key {obj.access_key} for {obj.username}'
+        }
+        return obj, extra_info
 
     # Replace access_key with the new one for write back to DB
     @event_logger.log_this
     def pre_update(self, obj):
         obj.access_key = obj.new_access_key
+        extra_info = {
+            'log_msg': f'renew access key {obj.access_key} of {obj.username}'
+        }
+        return obj, extra_info
 
     @event_logger.log_this
     def pre_delete(self, obj):
         print(f'delete access key of user: {obj.username}')
+        extra_info = {
+            'log_msg': f'revoke access key {obj.access_key} of {obj.username}'
+        }
+        return obj, extra_info
 
     # This function is used to generate new access key and fill in edit form
     def prefill_form(self, form, pk):
@@ -197,9 +209,6 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
         'exp_or_terminate_date': TextField('Expire/Terminate Date', widget=BS3TextFieldROWidget()),
         'status': TextField('Status', widget=BS3TextFieldROWidget()),
         'force_revoke': BooleanField('Force Revoke'),
-        # 'table_permissions': SelectMultipleField('Table Permissions'),
-        # 'table_permissions': SelectMultipleField('Table Permissions', widget=Select2ManyROWidget()),
-        # 'table_permissions': TextField('Table Permissions', widget=BS3TextFieldROWidget()),
     }
 
     add_columns = [
@@ -214,9 +223,15 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
             widget=Select2ManyWidget()),
     }
 
+    @event_logger.log_this
     def pre_add(self, obj):
         obj.table_permissions = obj.tables
+        extra_info = {
+            'log_msg': f'grant permissions of tables: {obj.table_permission_list} to {obj.user} til {obj.expire_date}'
+        }
+        return obj, extra_info
 
+    @event_logger.log_this
     def pre_update(self, obj):
         # Not allow re-activate permission
         if obj.status != 'Active':
@@ -231,10 +246,26 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
             obj.pop('force_revoke')
             obj.is_active == False
             obj.force_terminate_date = datetime.now()
+            extra_info = {
+                'log_msg': f'force revoke permissions of tables: {obj.table_permission_list} of {obj.user}'
+            }
+            return obj, extra_info
         else:
             raise SupersetException(
                 Markup("Nothing Changed")
             )
+
+    @event_logger.log_this
+    def pre_delete(self, obj):
+        if obj.is_active:
+            raise SupersetException(
+                Markup("Delete active permission is prohibited. Revoke permission before delete it.")
+            )
+
+        extra_info = {
+            'log_msg': f'delete expired/revoked permissions of tables: {obj.table_permission_list} of {obj.user}'
+        }
+        return obj, extra_info
 
 
 appbuilder.add_separator('Security')

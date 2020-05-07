@@ -92,7 +92,7 @@ class AbstractEventLogger(ABC):
                 schema=extra_info.get("schema"),
                 sql=extra_info.get("sql"),
                 err_msg=extra_info.get("err_msg"),
-                details=extra_info.get("details")
+                log_msg=extra_info.get("log_msg")
             )
             return value
 
@@ -160,7 +160,7 @@ class DBEventLogger(AbstractEventLogger):
         database = kwargs.get("database")
         schema = kwargs.get("schema")
         sql = kwargs.get("sql")
-        details = kwargs.get("details")
+        log_msg = kwargs.get("log_msg")
         err_msg = kwargs.get("err_msg")
         success = "true" if err_msg == None else "false"
 
@@ -188,8 +188,8 @@ class DBEventLogger(AbstractEventLogger):
             if err_msg != None:
                 json_log['err_msg'] = err_msg
 
-            if details != None:
-                json_log['details'] = details
+            if log_msg != None:
+                json_log['log_msg'] = log_msg
 
             self.appinsights(json_log)
 

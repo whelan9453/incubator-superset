@@ -3004,7 +3004,7 @@ class Superset(BaseSupersetView):
         session.commit()
         session.close()
 
-        extra_info = {'details': revoke_msg}
+        extra_info = {'log_msg': revoke_msg}
 
         return "OK", extra_info
 
