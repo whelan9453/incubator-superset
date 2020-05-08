@@ -72,11 +72,11 @@ class TablePermission(Model, AuditMixinNullable):
 
     # Following properties are used for display fields that are not expected to be changed
     @property
-    def detail_name(self):
+    def username_detail(self):
         return f'{self.user.get_full_name()} ({self.user.username})'
 
-    @detail_name.setter
-    def detail_name(self, value):
+    @username_detail.setter
+    def username_detail(self, value):
         pass
 
     @property

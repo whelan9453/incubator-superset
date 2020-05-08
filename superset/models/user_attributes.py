@@ -52,12 +52,12 @@ class UserAttribute(Model, AuditMixinNullable):
     # This is related to SQLA. Use @property from python or @hybrid_property from SQLA are both OK here.
     # Ref: https://docs.sqlalchemy.org/en/13/orm/extensions/hybrid.html#defining-expression-behavior-distinct-from-attribute-behavior
     @property
-    def detail_name(self):
+    def username_detail(self):
         return f'{self.user.get_full_name()} ({self.user.username})'
 
     # As we need to show username in add/edit views, we need to define a setter to deal with the assignment of the property
-    @detail_name.setter
-    def detail_name(self, value):
+    @username_detail.setter
+    def username_detail(self, value):
         pass
 
     @property

@@ -2998,11 +2998,11 @@ class Superset(BaseSupersetView):
         # Revoke permissions and prepare log msg
         revoke_msg = {'revoke-perm':[]}
         for perm in expired_perms:
-            perm_info = {'user': perm.username, 'perms':[]}
+            perm_info = {'user': perm.username_detail, 'permissions':[]}
             for table in perm.table_permissions:
-                perm_info['perms'].append(str(table))
-                logging.info(f"auto revoke {str(table)}")
+                perm_info['permissions'].append(re.sub(r'.* ', '', str(table)))
 
+            logging.info(f"Auto revoke: {str(perm_info)}")
             revoke_msg['revoke-perm'].append(perm_info)
             perm.is_active = False
             perm.changed_by_fk = perm.changed_by_fk
