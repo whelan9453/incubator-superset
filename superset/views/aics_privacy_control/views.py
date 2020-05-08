@@ -77,7 +77,7 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
     edit_title = _("Renew Access Key")
 
     list_columns = [
-        'detail_name',
+        'username_detail',
         'access_key',
         'created_on',
         'changed_on',
@@ -88,7 +88,7 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
     base_order = ('changed_on', 'desc')
 
     label_columns = {
-        'detail_name': _('User'),
+        'username_detail': _('User'),
         'access_key': _('Access Key'),
         'created_on': _('Created On'),
         'changed_on': _('Changed On'),
@@ -111,7 +111,7 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
     }
 
     edit_form_extra_fields = {
-        'detail_name': TextField('User Name', widget=BS3TextFieldROWidget()),
+        'username_detail': TextField('User Name', widget=BS3TextFieldROWidget()),
         'access_key': TextField('Original Access Key', widget=BS3TextFieldROWidget()),
         'new_access_key': TextField('New Access Key',
             description=('Not editable, click \'Save\' to replace the access key with this new key.'),
@@ -119,13 +119,13 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
     }
 
     edit_columns = [
-        'detail_name',
+        'username_detail',
         'access_key',
         'new_access_key',
     ]
 
     show_columns = [
-        'detail_name',
+        'username_detail',
         'access_key',
         'created_on',
         'changed_on',
@@ -136,7 +136,7 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
     def pre_add(self, obj):
         obj.user_id = obj.user.id
         extra_info = {
-            'log_msg': f'create access key {obj.access_key} for {obj.detail_name}'
+            'log_msg': f'create access key {obj.access_key} for {obj.username_detail}'
         }
         return obj, extra_info
 
@@ -145,14 +145,14 @@ class AccessKeyModelView(SupersetModelView, DeleteMixin):
     def pre_update(self, obj):
         obj.access_key = obj.new_access_key
         extra_info = {
-            'log_msg': f'renew access key {obj.access_key} of {obj.detail_name}'
+            'log_msg': f'renew access key {obj.access_key} of {obj.username_detail}'
         }
         return obj, extra_info
 
     @event_logger.log_this
     def pre_delete(self, obj):
         extra_info = {
-            'log_msg': f'revoke access key {obj.access_key} of {obj.detail_name}'
+            'log_msg': f'revoke access key {obj.access_key} of {obj.username_detail}'
         }
         return obj, extra_info
 
@@ -169,7 +169,7 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
     edit_title = _("Revoke Table Permissions")
 
     list_columns = [
-        'detail_name',
+        'username_detail',
         'table_permission_list',
         'exp_or_terminate_date',
         'is_active',
@@ -182,7 +182,7 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
 
     label_columns = {
         'exp_or_terminate_date': _('Expire/Terminate Date'),
-        'detail_name': _('User'),
+        'username_detail': _('User'),
         'table_permission_list': _('Table Permissions'),
         'avail_table_list': _('Table Permissions'),
         'is_active': _('Active'),
@@ -192,7 +192,7 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
     }
 
     edit_columns = [
-        'detail_name',
+        'username_detail',
         'table_permission_list',
         'exp_or_terminate_date',
         'status',
@@ -200,7 +200,7 @@ class TablePermissionModelView(SupersetModelView, DeleteMixin):
     ]
 
     edit_form_extra_fields = {
-        'detail_name': TextField('User Name', widget=BS3TextFieldROWidget()),
+        'username_detail': TextField('User Name', widget=BS3TextFieldROWidget()),
         'table_permission_list': TextField('Table Permissions', widget=BS3TextFieldROWidget()),
         'exp_or_terminate_date': TextField('Expire/Terminate Date', widget=BS3TextFieldROWidget()),
         'status': TextField('Status', widget=BS3TextFieldROWidget()),
