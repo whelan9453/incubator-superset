@@ -91,7 +91,8 @@ class AbstractEventLogger(ABC):
                 database=extra_info.get("database"),
                 schema=extra_info.get("schema"),
                 sql=extra_info.get("sql"),
-                err_msg=extra_info.get("err_msg")
+                err_msg=extra_info.get("err_msg"),
+                log_msg=extra_info.get("log_msg")
             )
             return value
 
@@ -159,6 +160,7 @@ class DBEventLogger(AbstractEventLogger):
         database = kwargs.get("database")
         schema = kwargs.get("schema")
         sql = kwargs.get("sql")
+        log_msg = kwargs.get("log_msg")
         err_msg = kwargs.get("err_msg")
         success = "true" if err_msg == None else "false"
 
@@ -178,12 +180,18 @@ class DBEventLogger(AbstractEventLogger):
                 user_id=user_id,
             )
             logs.append(log)
-            self.appinsights(
-                {'level': 'info', 'success': success, 'state':'finish',
+            json_log = {'level': 'info', 'success': success, 'state':'finish',
                 'function': action, 'json': json_string, 'duration': duration_ms, 
                 'referrer': referrer, 'user_id': user_id,
-                'database': database, 'schema': schema, 'sql': sql, 'err_msg': err_msg
-                })
+                'database': database, 'schema': schema, 'sql': sql
+                }
+            if err_msg != None:
+                json_log['err_msg'] = err_msg
+
+            if log_msg != None:
+                json_log['log_msg'] = log_msg
+
+            self.appinsights(json_log)
 
         sesh = current_app.appbuilder.get_session
         sesh.bulk_save_objects(logs)
