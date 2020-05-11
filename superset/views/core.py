@@ -3014,8 +3014,8 @@ class Superset(BaseSupersetView):
 
             return "OK", extra_info
         except Exception as e:
-            extra_info = {'err_msg': str(e)}
-            return json_error_response(e), extra_info
+            extra_info = {'err_msg': e}
+            return json_error_response('Auto-revoke failed'), extra_info
 
 
     @api
