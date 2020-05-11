@@ -2988,31 +2988,35 @@ class Superset(BaseSupersetView):
     def revoke_expired_perm(self):
         """Revoke expired permissions, triggered by HTTP GET requests from other scheduler"""
         session = db.session()
+        try:
+            # Get all expired permissions
+            expired_perms = session.query(TablePermission).filter(
+                TablePermission.is_active == True,
+                TablePermission.expire_date < datetime.now().date()
+            )
 
-        # Get all expired permissions
-        expired_perms = session.query(TablePermission).filter(
-            TablePermission.is_active == True,
-            TablePermission.expire_date < datetime.now().date()
-        )
+            # Revoke permissions and prepare log msg
+            revoke_msg = {'revoke-perm':[]}
+            for perm in expired_perms:
+                perm_info = {'user': perm.username_detail, 'permissions':[]}
+                for table in perm.table_permissions:
+                    perm_info['permissions'].append(re.sub(r'.* ', '', str(table)))
 
-        # Revoke permissions and prepare log msg
-        revoke_msg = {'revoke-perm':[]}
-        for perm in expired_perms:
-            perm_info = {'user': perm.username_detail, 'permissions':[]}
-            for table in perm.table_permissions:
-                perm_info['permissions'].append(re.sub(r'.* ', '', str(table)))
+                logging.info(f"Auto revoke: {str(perm_info)}")
+                revoke_msg['revoke-perm'].append(perm_info)
+                perm.is_active = False
+                perm.changed_by_fk = perm.changed_by_fk
 
-            logging.info(f"Auto revoke: {str(perm_info)}")
-            revoke_msg['revoke-perm'].append(perm_info)
-            perm.is_active = False
-            perm.changed_by_fk = perm.changed_by_fk
+            session.commit()
+            session.close()
 
-        session.commit()
-        session.close()
+            extra_info = {'log_msg': revoke_msg}
 
-        extra_info = {'log_msg': revoke_msg}
+            return "OK", extra_info
+        except Exception as e:
+            extra_info = {'err_msg': e}
+            return json_error_response('Auto-revoke failed'), extra_info
 
-        return "OK", extra_info
 
     @api
     @handle_api_exception

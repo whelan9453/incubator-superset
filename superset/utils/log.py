@@ -186,10 +186,10 @@ class DBEventLogger(AbstractEventLogger):
                 'database': database, 'schema': schema, 'sql': sql
                 }
             if err_msg != None:
-                json_log['err_msg'] = err_msg
+                json_log['err_msg'] = str(err_msg)
 
             if log_msg != None:
-                json_log['log_msg'] = log_msg
+                json_log['log_msg'] = str(log_msg)
 
             self.appinsights(json_log)
 
