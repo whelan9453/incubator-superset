@@ -2852,10 +2852,15 @@ class Superset(BaseSupersetView):
                     continue
 
                 for item in row:
-                    # Escape double quotes
-                    if '"' in str(item):
-                        item = item.replace('"', '""')
-                    s += f'"{item}",'
+                    # Avoid converting None to "None"
+                    if item == None:
+                        s += ','
+                    else:
+                        # Escape double quotes
+                        if '"' in str(item):
+                            item = item.replace('"', '""')
+                        s += f'"{item}",'
+                # Replace the latest "," with newline
                 s = s[:-1] + '\n'
                 yield s
 
