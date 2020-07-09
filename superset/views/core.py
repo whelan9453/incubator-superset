@@ -84,6 +84,7 @@ from superset.sql_validators import get_validator_by_name
 from superset.utils import core as utils, dashboard_import_export
 from superset.utils.dates import now_as_float
 from superset.utils.decorators import etag_cache, stats_timing
+from superset.views.aics_privacy_control.decorators import aics_access_key_verification
 
 from .base import (
     api,
@@ -2697,14 +2698,22 @@ class Superset(BaseSupersetView):
 
         logging.info(f"Triggering query_id: {query_id}")
 
+        # Extra log info for App Insights
+        extra_info = {
+            'user_id': query.user_id,
+            'database': query.database.name,
+            'schema': query.schema,
+            'tables': str(ParsedQuery(query.sql).tables),
+            'sql': query.sql
+        }
+
         rejected_tables = security_manager.rejected_tables(sql, mydb, schema)
         if rejected_tables:
             query.status = QueryStatus.FAILED
             session.commit()
 
             err_msg = security_manager.get_table_access_error_msg(rejected_tables)
-            # Extra log info for App Insights
-            extra_info = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql, 'err_msg': err_msg}
+            extra_info['err_msg']= err_msg
 
             return json_error_response(
                 err_msg,
@@ -2733,12 +2742,10 @@ class Superset(BaseSupersetView):
         if async_flag:
             return self._sql_json_async(session, rendered_query, query)
         
-        # Extra log info for App Insights
-        extra_info = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
         # Sync request.
         return self._sql_json_sync(session, rendered_query, query), extra_info
 
-    def _streaming_csv(self, query, client_id):
+    def _streaming_csv(self, query, client_id, extra_info):
 
         blob = None
         if results_backend and query.results_key:
@@ -2767,8 +2774,6 @@ class Superset(BaseSupersetView):
         logging.info("Running a query to turn into CSV")
         sql = query.sql or query.select_sql or query.executed_sql
 
-        # Extra log info for App Insights
-        extra_info = {'user_id': query.user_id, 'database': query.database.name, 'schema': query.schema, 'sql': query.sql}
 
         # Handle the situations when schema is empty
         if query.schema is None:
@@ -2816,15 +2821,13 @@ class Superset(BaseSupersetView):
                 # TODO: deal with DBAPIs that is not support streaming result
                 # ref: https://docs.sqlalchemy.org/en/13/core/connections.html#sqlalchemy.engine.Connection.execution_options.params.stream_results
                 data_stream = engine.execution_options(stream_results=True).execute(sql)
-                print_header = True
                 batch=1000
                 data_count = 0
                 chunk = data_stream.fetchmany(batch)
+                # Return header as first row
+                yield data_stream.keys()
                 while chunk:
                     for row in chunk:
-                        if print_header:
-                            print_header = False
-                            yield data_stream.keys()
                         data_count += 1
                         yield row
                     chunk = data_stream.fetchmany(batch)
@@ -2864,7 +2867,11 @@ class Superset(BaseSupersetView):
                 s = s[:-1] + '\n'
                 yield s
 
-        response = Response(generate(header_has_type=header_has_type), mimetype='text/csv')
+        try:
+            response = Response(generate(header_has_type=header_has_type), mimetype='text/csv')
+        except Exception as e:
+            extra_info['err_msg'] = str(e)
+
         # Add the header to assign the filename and filename extension of the response
         response.headers[
             "Content-Disposition"
@@ -2874,43 +2881,40 @@ class Superset(BaseSupersetView):
     @api
     @expose("/sql_csv_api", methods=["POST"])
     @event_logger.log_this
+    @aics_access_key_verification()
     def sql_csv_api(self):
         """Runs arbitrary sql and returns data as json"""
         # Collect Values
-        access_key: str = request.json.get("access_key")
         database_name: int = request.json.get("database_name")
         schema: str = request.json.get("schema")
         sql: str = request.json.get("sql")
 
         session = db.session()
-        user_id: int = session.query(UserAttribute.user_id).filter_by(access_key=access_key).first()
-
-        # Extra log info for App Insights
-        extra_info = {'database': database_name, 'schema': schema, 'sql': sql}
-
-        if user_id:
-            user_id = user_id[0]
-            extra_info['user_id'] = user_id
-            g.user = security_manager.get_user_by_id(user_id)
-        else:
-            err_msg = f"Invalid access_key: {str(access_key)}"
-            logging.warning(err_msg)
-            extra_info['err_msg'] = err_msg
-
-            return json_error_response(err_msg), extra_info
 
         parsed_query = ParsedQuery(sql)
+
+        user_id = g.user.get_id() if g.user else None
+
+        # Extra log info for App Insights
+        extra_info = {
+            'user_id': user_id,
+            'database': database_name,
+            'schema': schema,
+            'tables': str(parsed_query.tables),
+            'sql': sql
+        }
 
         if not parsed_query.is_readonly():
             err_msg = _("Only `SELECT` statements are allowed against this database")
             logging.warning(err_msg)
             extra_info['err_msg'] = str(err_msg)
-
             return json_error_response(err_msg), extra_info
 
         mydb = session.query(models.Database).filter_by(database_name=database_name).one_or_none()
         if not mydb:
-            return json_error_response(f"Database with name {database_name} is missing. , User name: {g.user}")
+            err_msg = f"Database with name {database_name} is missing. , User name: {g.user}"
+            extra_info['err_msg'] = err_msg
+            return json_error_response(err_msg), extra_info
 
         database_id: int = mydb.id
 
@@ -2956,15 +2960,15 @@ class Superset(BaseSupersetView):
 
             err_msg = security_manager.get_table_access_error_msg(rejected_tables)
             # Extra log info for App Insights
-            extra_info = {'user_id': user_id, 'database': database_name, 'schema': schema, 'sql': sql, 'err_msg': err_msg}
+            extra_info['err_msg'] = err_msg
 
             return json_error_response(
-                err_msg,
-                link=security_manager.get_table_access_link(rejected_tables),
-                status=403,
-            ), extra_info
+                    err_msg,
+                    link=security_manager.get_table_access_link(rejected_tables),
+                    status=403,
+                ), extra_info
 
-        return self._streaming_csv(query, client_id)
+        return self._streaming_csv(query, client_id, extra_info)
 
     @has_access
     @expose("/csv/<client_id>")
@@ -2977,15 +2981,96 @@ class Superset(BaseSupersetView):
         rejected_tables = security_manager.rejected_tables(
             query.sql, query.database, query.schema
         )
+
+        # Extra log info for App Insights
+        extra_info = {
+            'user_id': query.user_id,
+            'database': query.database.name,
+            'schema': query.schema,
+            'tables': str(ParsedQuery(query.sql).tables),
+            'sql': query.sql,
+        }
+
         if rejected_tables:
             err_msg = security_manager.get_table_access_error_msg(rejected_tables)
-            # Extra log info for App Insights
-            extra_info = {'database': query.database.name, 'schema': query.schema, 'sql': query.sql, 'err_msg': err_msg}
+            extra_info['err_msg'] = err_msg
 
             flash(err_msg)
             return redirect("/"), extra_info
 
-        return self._streaming_csv(query, client_id)
+        return self._streaming_csv(query, client_id, extra_info)
+
+    @api
+    @expose("/verify_user_perm", methods=["POST"])
+    @event_logger.log_this
+    @aics_access_key_verification(require_admin=True)
+    def verify_user_perm(self):
+        req_json = request.get_json()
+
+        user_id: int = req_json.get("user_id")
+        database_name: list = req_json.get("database_name")
+        schema: str = request.json.get("schema")
+        table_list: list = req_json.get("table_list")
+        access_date: str = req_json.get("access_date")
+
+        print(req_json)
+        session = db.session()
+
+        user = security_manager.get_user_by_id(user_id)
+        mydb = session.query(models.Database).filter_by(database_name=database_name).one_or_none()
+        perm_check_result = {}
+
+        user_table_permissions = db.session.query(TablePermission).filter(
+            user_id == user_id,
+            TablePermission.apply_date <= access_date,
+            TablePermission.expire_date >= access_date,
+            or_(
+                TablePermission.force_terminate_date >= access_date,
+                TablePermission.force_terminate_date == None
+            )
+        )
+
+        Role = ab_models.Role
+        admin_role = session.query(Role).filter(Role.name == "Admin").one_or_none()
+
+        for table_name in table_list:
+            perm_check_result[table_name] = {
+                'allow_access': False,
+                'perm_begin': None,
+                'perm_end': None,
+                'force_revoke_date': None
+            }
+
+            if admin_role in user.roles:
+                perm_check_result[table_name]['allow_access'] = True
+                perm_check_result[table_name]['user_role'] = str(user.roles)
+
+            datasources = ConnectorRegistry.query_datasources_by_name(
+                db.session, mydb, table_name, schema=schema
+            )
+            print(str(datasources))
+            for datasource in datasources:
+                # Check permission using AppBuilder Roles
+                print(f'{table_name}: {str(datasource.perm)}')
+                if security_manager._has_view_access(user, "datasource_access", datasource.perm):
+                    perm_check_result[table_name]['allow_access'] = True
+                    perm_check_result[table_name]['user_role'] = str(user.roles)
+
+                # get permission of specified permission name and view name
+                perm = security_manager.find_permission_view_menu("datasource_access", datasource.perm)
+
+                print(user_table_permissions)
+                for user_permission in user_table_permissions:
+                    print(user_permission)
+                    print(user_permission.table_permissions)
+                    if perm in user_permission.table_permissions:
+                        perm_check_result[table_name]['allow_access'] = True
+                        perm_check_result[table_name]['perm_begin'] = str(user_permission.apply_date)
+                        perm_check_result[table_name]['perm_end'] = str(user_permission.expire_date)
+                        perm_check_result[table_name]['force_revoke_date'] = str(user_permission.force_terminate_date)
+
+
+        return perm_check_result
 
     @api
     @expose("/revoke_expired_perm", methods=["GET"])
